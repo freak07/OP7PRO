@@ -884,7 +884,7 @@ next_step:
 			}
 
 			if (!down_write_trylock(
-				&F2FS_I(inode)->dio_rwsem[WRITE])) {
+				&F2FS_I(inode)->i_gc_rwsem[WRITE])) {
 				iput(inode);
 				continue;
 			}
@@ -893,7 +893,7 @@ next_step:
 			data_page = get_read_data_page(inode,
 					start_bidx + ofs_in_node, REQ_RAHEAD,
 					true);
-			up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
+			up_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 			if (IS_ERR(data_page)) {
 				iput(inode);
 				continue;
@@ -912,11 +912,11 @@ next_step:
 			int err;
 
 			if (S_ISREG(inode->i_mode)) {
-				if (!down_write_trylock(&fi->dio_rwsem[READ]))
+				if (!down_write_trylock(&fi->i_gc_rwsem[READ]))
 					continue;
 				if (!down_write_trylock(
-						&fi->dio_rwsem[WRITE])) {
-					up_write(&fi->dio_rwsem[READ]);
+						&fi->i_gc_rwsem[WRITE])) {
+					up_write(&fi->i_gc_rwsem[READ]);
 					continue;
 				}
 				locked = true;
@@ -938,8 +938,8 @@ next_step:
 				submitted++;
 
 			if (locked) {
-				up_write(&fi->dio_rwsem[WRITE]);
-				up_write(&fi->dio_rwsem[READ]);
+				up_write(&fi->i_gc_rwsem[WRITE]);
+				up_write(&fi->i_gc_rwsem[READ]);
 			}
 
 			stat_inc_data_blk_count(sbi, 1, gc_type);
