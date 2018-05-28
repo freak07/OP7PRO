@@ -469,7 +469,7 @@ int f2fs_submit_page_bio(struct f2fs_io_info *fio)
 	return 0;
 }
 
-int f2fs_submit_page_write(struct f2fs_io_info *fio)
+void f2fs_submit_page_write(struct f2fs_io_info *fio)
 {
 	struct f2fs_sb_info *sbi = fio->sbi;
 	enum page_type btype = PAGE_TYPE_OF_BIO(fio->type);
@@ -479,7 +479,6 @@ int f2fs_submit_page_write(struct f2fs_io_info *fio)
 	bool bio_encrypted;
 	int bi_crypt_skip;
 	u64 dun;
-	int err = 0;
 
 	f2fs_bug_on(sbi, is_read_io(fio->op));
 
@@ -489,7 +488,7 @@ next:
 		spin_lock(&io->io_lock);
 		if (list_empty(&io->io_list)) {
 			spin_unlock(&io->io_lock);
-			goto out_fail;
+			goto out;
 		}
 		fio = list_first_entry(&io->io_list,
 						struct f2fs_io_info, list);
@@ -526,9 +525,9 @@ alloc_new:
 	if (io->bio == NULL) {
 		if ((fio->type == DATA || fio->type == NODE) &&
 				fio->new_blkaddr & F2FS_IO_SIZE_MASK(sbi)) {
-			err = -EAGAIN;
 			dec_page_count(sbi, WB_DATA_TYPE(bio_page));
-			goto out_fail;
+			fio->retry = true;
+			goto skip;
 		}
 		io->bio = __bio_alloc(sbi, fio->new_blkaddr, fio->io_wbc,
 						BIO_MAX_PAGES, false,
@@ -551,12 +550,11 @@ alloc_new:
 	f2fs_trace_ios(fio, 0);
 
 	trace_f2fs_submit_page_write(fio->page, fio);
-
+skip:
 	if (fio->in_list)
 		goto next;
-out_fail:
+out:
 	up_write(&io->io_rwsem);
-	return err;
 }
 
 static struct bio *f2fs_grab_read_bio(struct inode *inode, block_t blkaddr,
