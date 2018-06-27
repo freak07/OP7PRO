@@ -212,7 +212,7 @@ unsigned int aigov_get_weight(void)
 void aigov_update_util(int clus)
 {
 	/* FIXME, pick first cpu as target */
-	int flag = SCHED_CPUFREQ_WALT | SCHED_CPUFREQ_AIGOV;
+	int flag = SCHED_CPUFREQ_AIGOV;
 	int cpu = clus_to_first_cpu(clus);
 
 	if (!aigov_can_update)
