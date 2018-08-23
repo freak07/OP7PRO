@@ -1600,6 +1600,7 @@ submit_and_realloc:
 			if (bio_encrypted)
 				fscrypt_set_ice_dun(inode, bio, dun);
 		}
+
 		/*
 		 * If the page is under writeback, we need to wait for
 		 * its completion to see the correct decrypted data.
