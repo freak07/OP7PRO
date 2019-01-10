@@ -193,7 +193,8 @@ int detect_share_cap_flag(void)
 			continue;
 		}
 
-		if (cpumask_equal(topology_sibling_cpumask(cpu),
+		if (share_cap_level < share_cap_thread &&
+			cpumask_equal(topology_sibling_cpumask(cpu),
 				  policy->related_cpus)) {
 			share_cap_level = share_cap_thread;
 			continue;
