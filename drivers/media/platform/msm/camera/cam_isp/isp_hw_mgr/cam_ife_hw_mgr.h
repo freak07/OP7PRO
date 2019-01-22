@@ -133,6 +133,7 @@ struct cam_ife_hw_mgr_debug {
  * @config_done_complete    indicator for configuration complete
  * @init_done               indicate whether init hw is done
  * @is_fe_enable            indicate whether fetch engine\read path is enabled
+ * @res_bitmap              fill resource bitmap for which rup to be set
  * @dual_ife_irq_mismatch_cnt   irq mismatch count value per core, used for
  *                              dual VFE
  */
@@ -172,6 +173,7 @@ struct cam_ife_hw_mgr_ctx {
 	bool                            init_done;
 	bool                            is_fe_enable;
 	uint32_t                        dual_ife_irq_mismatch_cnt;
+	unsigned long                   res_bitmap;
 };
 
 /**
