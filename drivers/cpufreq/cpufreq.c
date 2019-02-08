@@ -370,7 +370,7 @@ static void __cpufreq_notify_transition(struct cpufreq_policy *policy,
 		trace_cpu_frequency(freqs->new, freqs->cpu);
 		if (freqs->new != policy->cur)
 			cpufreq_stats_record_transition(policy, freqs->new);
-		cpufreq_times_record_transition(freqs);
+		cpufreq_times_record_transition(policy, freqs->new);
 		srcu_notifier_call_chain(&cpufreq_transition_notifier_list,
 				CPUFREQ_POSTCHANGE, freqs);
 		if (likely(policy) && likely(policy->cpu == freqs->cpu))
@@ -1916,6 +1916,7 @@ unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 					unsigned int target_freq)
 {
 	struct qos_request_value *qos;
+	int ret;
 
 	target_freq = clamp_val(target_freq, policy->min, policy->max);
 	if (policy->cpu >= cluster2_first_cpu)
@@ -1927,7 +1928,11 @@ unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 	target_freq = clamp_val(target_freq, qos->min_cpufreq,
 				qos->max_cpufreq);
 
-	return cpufreq_driver->fast_switch(policy, target_freq);
+        ret = cpufreq_driver->fast_switch(policy, target_freq);
+	if (ret)
+		cpufreq_times_record_transition(policy, ret);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(cpufreq_driver_fast_switch);
 
