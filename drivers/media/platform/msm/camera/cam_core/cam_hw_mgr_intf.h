@@ -259,6 +259,16 @@ struct cam_hw_dump_pf_args {
 };
 
 /**
+ * struct cam_hw_reset_args -hw reset arguments
+ *
+ * @ctxt_to_hw_map:        HW context from the acquire
+ *
+ */
+struct cam_hw_reset_args {
+	void                           *ctxt_to_hw_map;
+};
+
+/**
  * struct cam_hw_dump_args - Dump arguments
  *
  * @request_id:            request_id
@@ -325,6 +335,7 @@ struct cam_hw_cmd_args {
  * @hw_close:                  Function pointer for HW deinit
  * @hw_flush:                  Function pointer for HW flush
  * @hw_dump:                   Function pointer for HW dump
+ * @hw_reset:                  Function pointer for HW reset
  *
  */
 struct cam_hw_mgr_intf {
@@ -346,6 +357,7 @@ struct cam_hw_mgr_intf {
 	int (*hw_close)(void *hw_priv, void *hw_close_args);
 	int (*hw_flush)(void *hw_priv, void *hw_flush_args);
 	int (*hw_dump)(void *hw_priv, void *hw_dump_args);
+	int (*hw_reset)(void *hw_priv, void *hw_reset_args);
 };
 
 #endif /* _CAM_HW_MGR_INTF_H_ */
