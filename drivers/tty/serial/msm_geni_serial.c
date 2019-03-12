@@ -130,21 +130,6 @@
 		ipc_log_string(ctx, x); \
 } while (0)
 
-
-/*we use dynamic add console , so we can't use __init  __exit, this will cause can't find func*/
-#ifdef __init
-#undef __init
-#endif
-
-#ifdef __exit
-#undef __exit
-#endif
-
-#define __init
-#define __exit
-
-
-
 #define DMA_RX_BUF_SIZE		(2048)
 #define UART_CONSOLE_RX_WM	(2)
 
@@ -155,6 +140,10 @@ struct msm_geni_serial_ver_info {
 	int m_fw_ver;
 	int s_fw_ver;
 };
+
+#if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
+#define SERIAL_CONSOLE
+#endif
 
 struct msm_geni_serial_port {
 	struct uart_port uport;
@@ -196,7 +185,9 @@ struct msm_geni_serial_port {
 };
 
 static const struct uart_ops msm_geni_serial_pops;
+#ifdef SERIAL_CONSOLE
 static struct uart_driver msm_geni_console_driver;
+#endif
 static struct uart_driver msm_geni_serial_hs_driver;
 static int handle_rx_console(struct uart_port *uport,
 			unsigned int rx_fifo_wc,
@@ -222,7 +213,9 @@ static int msm_geni_serial_get_ver_info(struct uart_port *uport);
 #define GET_DEV_PORT(uport) \
 	container_of(uport, struct msm_geni_serial_port, uport)
 
+#ifdef SERIAL_CONSOLE
 static struct msm_geni_serial_port msm_geni_console_port;
+#endif
 static struct msm_geni_serial_port msm_geni_serial_ports[GENI_UART_NR_PORTS];
 
 static void msm_geni_serial_config_port(struct uart_port *uport, int cfg_flags)
@@ -497,6 +490,7 @@ static const char *msm_geni_serial_get_type(struct uart_port *uport)
 	return "MSM";
 }
 
+#ifdef SERIAL_CONSOLE
 static struct msm_geni_serial_port *get_port_from_line(int line,
 						bool is_console)
 {
@@ -514,6 +508,15 @@ static struct msm_geni_serial_port *get_port_from_line(int line,
 
 	return port;
 }
+#else
+static struct msm_geni_serial_port *get_port_from_line(int line)
+{
+	if ((line < 0) || (line >= GENI_UART_NR_PORTS))
+		return ERR_PTR(-ENXIO);
+
+	return &msm_geni_serial_ports[line];
+}
+#endif
 
 static int msm_geni_serial_power_on(struct uart_port *uport)
 {
@@ -731,7 +734,7 @@ static void msm_geni_serial_poll_put_char(struct uart_port *uport,
 }
 #endif
 
-#if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
+#ifdef SERIAL_CONSOLE
 static void msm_geni_serial_wr_char(struct uart_port *uport, int ch)
 {
 	geni_write_reg_nolog(ch, uport->membase, SE_GENI_TX_FIFOn);
@@ -2099,7 +2102,7 @@ static ssize_t ver_info_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(ver_info);
 
-#if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
+#ifdef SERIAL_CONSOLE
 static int __init msm_geni_console_setup(struct console *co, char *options)
 {
 	struct uart_port *uport;
@@ -2277,17 +2280,9 @@ static struct uart_driver msm_geni_console_driver = {
 	.nr =  GENI_UART_NR_PORTS,
 	.cons = &cons_ops,
 };
-#else
-static int console_register(struct uart_driver *drv)
-{
-	return 0;
-}
+#endif
 
-static void console_unregister(struct uart_driver *drv)
-{
-}
-#endif /* defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL) */
-
+#ifdef DEBUG
 static void msm_geni_serial_debug_init(struct uart_port *uport, bool console)
 {
 	struct msm_geni_serial_port *msm_port = GET_DEV_PORT(uport);
@@ -2337,6 +2332,7 @@ static void msm_geni_serial_debug_init(struct uart_port *uport, bool console)
 		}
 	}
 }
+#endif
 
 static void msm_geni_serial_cons_pm(struct uart_port *uport,
 		unsigned int new_state, unsigned int old_state)
@@ -2390,7 +2386,7 @@ static const struct uart_ops msm_geni_serial_pops = {
 };
 
 static const struct of_device_id msm_geni_device_tbl[] = {
-#if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
+#ifdef SERIAL_CONSOLE
 	{ .compatible = "qcom,msm-geni-console-oem",
 			.data = (void *)&msm_geni_console_driver},
 #endif
@@ -2398,26 +2394,6 @@ static const struct of_device_id msm_geni_device_tbl[] = {
 			.data = (void *)&msm_geni_serial_hs_driver},
 	{},
 };
-
-struct oemconsole {
-	bool default_console;
-	bool console_initialized;
-};
-
-static struct oemconsole oem_console  = {
-	.default_console       = false,
-	.console_initialized   = false,
-};
-
-static int __init parse_console_config(char *str)
-{
-	if (str != NULL)
-		oem_console.default_console = true;
-	return 0;
-}
-early_param("console", parse_console_config);
-static int  msm_serial_oem_pinctrl_init(void);
-static int  oem_msm_geni_serial_init(void);
 
 static int msm_geni_serial_get_ver_info(struct uart_port *uport)
 {
@@ -2504,8 +2480,13 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 				"M - DRIVER GENI_HS_UART_%d Init", line);
 	place_marker(boot_marker);
 
+#ifdef SERIAL_CONSOLE
 	is_console = (drv->cons ? true : false);
 	dev_port = get_port_from_line(line, is_console);
+#else
+	dev_port = get_port_from_line(line);
+#endif
+
 	if (IS_ERR_OR_NULL(dev_port)) {
 		ret = PTR_ERR(dev_port);
 		dev_err(&pdev->dev, "Invalid line %d(%d)\n",
@@ -2679,7 +2660,9 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	device_create_file(uport->dev, &dev_attr_loopback);
 	device_create_file(uport->dev, &dev_attr_xfer_mode);
 	device_create_file(uport->dev, &dev_attr_ver_info);
+#ifdef DEBUG
 	msm_geni_serial_debug_init(uport, is_console);
+#endif
 	dev_port->port_setup = false;
 	ret = msm_geni_serial_get_ver_info(uport);
 	if (ret)
@@ -2883,10 +2866,12 @@ static const struct dev_pm_ops msm_geni_serial_pm_ops = {
 	.freeze = msm_geni_serial_sys_suspend_noirq,
 	.restore = msm_geni_serial_sys_hib_resume_noirq,
 };
+
 static const struct of_device_id msm_geni_device_tbl_oem_hs[] = {
 	{ .compatible = "qcom,msm-geni-serial-hs"},
 	{},
 };
+
 static struct platform_driver msm_geni_serial_platform_driver = {
 	.remove = msm_geni_serial_remove,
 	.probe = msm_geni_serial_probe,
@@ -2897,22 +2882,6 @@ static struct platform_driver msm_geni_serial_platform_driver = {
 	},
 };
 
-static const struct of_device_id msm_geni_device_tbl_oem_console[] = {
-	{ .compatible = "qcom,msm-geni-console-oem",},
-	{},
-};
-
-static struct platform_driver msm_geni_serial_platform_driver_oem_console = {
-	.remove = msm_geni_serial_remove,
-	.probe = msm_geni_serial_probe,
-	.driver = {
-		.name = "msm_geni_serial_oem",
-		.of_match_table = msm_geni_device_tbl_oem_console,
-		.pm = &msm_geni_serial_pm_ops,
-	},
-};
-
-
 static struct uart_driver msm_geni_serial_hs_driver = {
 	.owner = THIS_MODULE,
 	.driver_name = "msm_geni_serial_hs",
@@ -2920,85 +2889,8 @@ static struct uart_driver msm_geni_serial_hs_driver = {
 	.nr =  GENI_UART_NR_PORTS,
 };
 
-static int __init msm_geni_serial_init(void)
-{
-	int ret = 0;
-	int i;
-
-	for (i = 0; i < GENI_UART_NR_PORTS; i++) {
-		msm_geni_serial_ports[i].uport.iotype = UPIO_MEM;
-		msm_geni_serial_ports[i].uport.ops = &msm_geni_serial_pops;
-		msm_geni_serial_ports[i].uport.flags = UPF_BOOT_AUTOCONF;
-		msm_geni_serial_ports[i].uport.line = i;
-	}
-
-	for (i = 0; i < GENI_UART_CONS_PORTS; i++) {
-		msm_geni_console_port.uport.iotype = UPIO_MEM;
-		msm_geni_console_port.uport.ops = &msm_geni_console_pops;
-		msm_geni_console_port.uport.flags = UPF_BOOT_AUTOCONF;
-		msm_geni_console_port.uport.line = i;
-	}
-
-	ret = uart_register_driver(&msm_geni_serial_hs_driver);
-	if (ret) {
-		uart_unregister_driver(&msm_geni_console_driver);
-		return ret;
-	}
-
-	ret = platform_driver_register(&msm_geni_serial_platform_driver);
-	if (ret) {
-		console_unregister(&msm_geni_console_driver);
-		uart_unregister_driver(&msm_geni_serial_hs_driver);
-		return ret;
-	}
-
-	pr_info("%s: Driver initialized", __func__);
-
-	if(oem_console.default_console == 1)
-		 oem_msm_geni_serial_init();
-	else
-		 msm_serial_oem_pinctrl_init();
-
-	return ret;
-}
-module_init(msm_geni_serial_init);
-
-static void __exit msm_geni_serial_exit(void)
-{
-	platform_driver_unregister(&msm_geni_serial_platform_driver);
-	uart_unregister_driver(&msm_geni_serial_hs_driver);
-	console_unregister(&msm_geni_console_driver);
-}
-module_exit(msm_geni_serial_exit);
-
-
-static int oem_msm_geni_serial_init(void)
-{
-	int ret = 0;
-
-	pr_err("%s console_initialized=%d \n", __func__,oem_console.console_initialized);
-
-	if(oem_console.console_initialized != 1 ) {
-		oem_console.console_initialized = 1;
-		ret = console_register(&msm_geni_console_driver);
-		if (ret)
-			return ret;
-
-		ret = platform_driver_register(&msm_geni_serial_platform_driver_oem_console);
-		if (ret) {
-			console_unregister(&msm_geni_console_driver);
-			return ret;
-		}
-		pr_info("%s: initialized", __func__);
-	}
-	return ret;
-}
-
-
-
 static int msm_serial_pinctrl_probe(struct platform_device *pdev)
 {
-
 	struct pinctrl *pinctrl = NULL;
 	struct pinctrl_state *set_state = NULL;
 	struct device *dev = &pdev->dev;
@@ -3007,7 +2899,6 @@ static int msm_serial_pinctrl_probe(struct platform_device *pdev)
 	pinctrl = devm_pinctrl_get(dev);
 
 	if (pinctrl != NULL) {
-
 		set_state = pinctrl_lookup_state(
 				pinctrl, "uart_pinctrl_deactive");
 
@@ -3040,40 +2931,61 @@ static struct platform_driver msm_platform_serial_pinctrl_driver = {
 	},
 };
 
-static int	msm_serial_oem_pinctrl_init(void)
+static int __init msm_geni_serial_init(void)
 {
 	int ret = 0;
+	int i;
 
-	pr_err("%s\n", __func__);
+	for (i = 0; i < GENI_UART_NR_PORTS; i++) {
+		msm_geni_serial_ports[i].uport.iotype = UPIO_MEM;
+		msm_geni_serial_ports[i].uport.ops = &msm_geni_serial_pops;
+		msm_geni_serial_ports[i].uport.flags = UPF_BOOT_AUTOCONF;
+		msm_geni_serial_ports[i].uport.line = i;
+	}
 
-	ret = platform_driver_register(&msm_platform_serial_pinctrl_driver);
+#ifdef SERIAL_CONSOLE
+	for (i = 0; i < GENI_UART_CONS_PORTS; i++) {
+		msm_geni_console_port.uport.iotype = UPIO_MEM;
+		msm_geni_console_port.uport.ops = &msm_geni_console_pops;
+		msm_geni_console_port.uport.flags = UPF_BOOT_AUTOCONF;
+		msm_geni_console_port.uport.line = i;
+	}
+#endif
+
+	ret = uart_register_driver(&msm_geni_serial_hs_driver);
+	if (ret) {
+#ifdef SERIAL_CONSOLE
+		uart_unregister_driver(&msm_geni_console_driver);
+#endif
+		return ret;
+	}
+
+	ret = platform_driver_register(&msm_geni_serial_platform_driver);
+	if (ret) {
+#ifdef SERIAL_CONSOLE
+		console_unregister(&msm_geni_console_driver);
+#endif
+		uart_unregister_driver(&msm_geni_serial_hs_driver);
+		return ret;
+	}
+
+	pr_info("%s: Driver initialized", __func__);
+
+	platform_driver_register(&msm_platform_serial_pinctrl_driver);
 
 	return ret;
 }
-EXPORT_SYMBOL(msm_serial_oem_pinctrl_init);
+module_init(msm_geni_serial_init);
 
-#define SERIAL_CMDLINE "ttyMSM0,115200n8"
-char oem_force_cmdline_str[60];
-
-int msm_serial_oem_init(void)
+static void __exit msm_geni_serial_exit(void)
 {
-	int ret = 0;
-
-	pr_err("%s\n", __func__);
-
-	memcpy(oem_force_cmdline_str, SERIAL_CMDLINE, sizeof(SERIAL_CMDLINE));
-	force_oem_console_setup(&oem_force_cmdline_str[0]);
-	oem_msm_geni_serial_init();
-	return ret;
+	platform_driver_unregister(&msm_geni_serial_platform_driver);
+	uart_unregister_driver(&msm_geni_serial_hs_driver);
+#ifdef SERIAL_CONSOLE
+	console_unregister(&msm_geni_console_driver);
+#endif
 }
-EXPORT_SYMBOL(msm_serial_oem_init);
-
-void msm_serial_oem_exit(void)
-{
-	pr_err("%s\n", __func__);
-	msm_geni_serial_exit();
-}
-EXPORT_SYMBOL(msm_serial_oem_exit);
+module_exit(msm_geni_serial_exit);
 
 MODULE_DESCRIPTION("Serial driver for GENI based QTI serial cores");
 MODULE_LICENSE("GPL v2");
