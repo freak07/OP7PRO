@@ -36,14 +36,13 @@ static void __fscrypt_decrypt_bio(struct bio *bio, bool done)
 		if (fscrypt_using_hardware_encryption(page->mapping->host)) {
 			SetPageUptodate(page);
 		} else {
-			int ret = fscrypt_decrypt_page(page->mapping->host,
-				page, PAGE_SIZE, 0, page->index);
-			if (ret) {
-				WARN_ON_ONCE(1);
-				SetPageError(page);
-			} else if (done) {
+		int ret = fscrypt_decrypt_page(page->mapping->host, page,
+				PAGE_SIZE, 0, page->index);
+
+		if (ret)
+			SetPageError(page);
+		else if (done)
 				SetPageUptodate(page);
-			}
 		}
 		if (done)
 			unlock_page(page);
