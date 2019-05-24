@@ -1,1 +1,1 @@
-../../../../../kernel/msm-4.14/drivers/pinctrl/core.h
+/home/miles/Android_Build/Devices/OP7PRO/android_kernel_oneplus_sm8150/drivers/pinctrl/core.h
