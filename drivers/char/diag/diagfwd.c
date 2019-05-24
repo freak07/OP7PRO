@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -562,7 +562,7 @@ void diag_process_stm_mask(uint8_t cmd, uint8_t data_mask, int data_type)
 	}
 }
 
-int diag_process_stm_cmd(unsigned char *buf, unsigned char *dest_buf)
+int diag_process_stm_cmd(unsigned char *buf, int len, unsigned char *dest_buf)
 {
 	uint8_t version, mask, cmd;
 	uint8_t rsp_supported = 0;
@@ -574,7 +574,11 @@ int diag_process_stm_cmd(unsigned char *buf, unsigned char *dest_buf)
 		       buf, dest_buf, __func__);
 		return -EIO;
 	}
-
+	if (len < STM_CMD_NUM_BYTES) {
+		pr_err("diag: Invalid buffer length: %d in %s\n", len,
+			__func__);
+		return -EINVAL;
+	}
 	version = *(buf + STM_CMD_VERSION_OFFSET);
 	mask = *(buf + STM_CMD_MASK_OFFSET);
 	cmd = *(buf + STM_CMD_DATA_OFFSET);
@@ -1006,8 +1010,8 @@ int diag_process_apps_pkt(unsigned char *buf, int len, int pid)
 	entry.cmd_code_lo = (uint16_t)(*(uint16_t *)temp);
 	temp += sizeof(uint16_t);
 
-	pr_debug("diag: In %s, received cmd %02x %02x %02x\n",
-		 __func__, entry.cmd_code, entry.subsys_id, entry.cmd_code_hi);
+	DIAG_LOG(DIAG_DEBUG_CMD_INFO, "diag: received cmd %02x %02x %02x\n",
+		 entry.cmd_code, entry.subsys_id, entry.cmd_code_hi);
 
 	if (*buf == DIAG_CMD_LOG_ON_DMND && driver->log_on_demand_support &&
 	    driver->feature[PERIPHERAL_MODEM].rcvd_feature_mask) {
@@ -1061,12 +1065,13 @@ int diag_process_apps_pkt(unsigned char *buf, int len, int pid)
 		return 0;
 	} else if ((*buf == 0x4b) && (*(buf+1) == 0x12) &&
 		(*(uint16_t *)(buf+2) == DIAG_DIAG_STM)) {
-		len = diag_process_stm_cmd(buf, driver->apps_rsp_buf);
-		if (len > 0) {
-			diag_send_rsp(driver->apps_rsp_buf, len, pid);
+		write_len = diag_process_stm_cmd(buf, len,
+			driver->apps_rsp_buf);
+		if (write_len > 0) {
+			diag_send_rsp(driver->apps_rsp_buf, write_len, pid);
 			return 0;
 		}
-		return len;
+		return write_len;
 	}
 	/* Check for time sync query command */
 	else if ((*buf == DIAG_CMD_DIAG_SUBSYS) &&
@@ -1675,7 +1680,7 @@ void diag_process_non_hdlc_pkt(unsigned char *buf, int len, int pid)
 		if (*(uint8_t *)(data_ptr + actual_pkt->length) !=
 						CONTROL_CHAR) {
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			mutex_lock(&driver->hdlc_recovery_mutex);
 		}
 		err = diag_process_apps_pkt(data_ptr,
@@ -1701,8 +1706,8 @@ start:
 		pkt_len = actual_pkt->length;
 
 		if (actual_pkt->start != CONTROL_CHAR) {
-			diag_hdlc_start_recovery(buf, len, pid);
-			diag_send_error_rsp(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
+			diag_send_error_rsp(buf, (len - read_bytes), pid);
 			goto end;
 		}
 		mutex_lock(&driver->hdlc_recovery_mutex);
@@ -1710,7 +1715,7 @@ start:
 			pr_err("diag: In %s, incoming data is too large for the request buffer %d\n",
 			       __func__, pkt_len);
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			break;
 		}
 		if ((pkt_len + header_len) > (len - read_bytes)) {
@@ -1727,7 +1732,7 @@ start:
 		if (*(uint8_t *)(data_ptr + actual_pkt->length) !=
 						CONTROL_CHAR) {
 			mutex_unlock(&driver->hdlc_recovery_mutex);
-			diag_hdlc_start_recovery(buf, len, pid);
+			diag_hdlc_start_recovery(buf, (len - read_bytes), pid);
 			mutex_lock(&driver->hdlc_recovery_mutex);
 		} else
 			hdlc_reset = 0;
@@ -1783,9 +1788,11 @@ static int diagfwd_mux_write_done(unsigned char *buf, int len, int buf_ctxt,
 			diagfwd_write_done(peripheral, type, num);
 			diag_ws_on_copy(DIAG_WS_MUX);
 		} else if (peripheral == APPS_DATA) {
+			spin_lock_irqsave(&driver->diagmem_lock, flags);
 			diagmem_free(driver, (unsigned char *)buf,
 				     POOL_TYPE_HDLC);
 			buf = NULL;
+			spin_unlock_irqrestore(&driver->diagmem_lock, flags);
 		} else {
 			pr_err_ratelimited("diag: Invalid peripheral %d in %s, type: %d\n",
 					   peripheral, __func__, type);

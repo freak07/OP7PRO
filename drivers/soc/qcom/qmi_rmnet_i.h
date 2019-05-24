@@ -41,13 +41,11 @@ struct rmnet_bearer_map {
 	u32 grant_thresh;
 	u16 seq;
 	u8  ack_req;
-
-//	u32 grant_before_ps;
-//	u16 seq_before_ps;
 	u32 last_grant;
 	u16 last_seq;
-
-	u32 ancillary;
+	bool tcp_bidir;
+	bool rat_switch;
+	bool tx_off;
 };
 
 struct svc_info {
@@ -78,11 +76,9 @@ struct qmi_info {
 	void *dfc_clients[MAX_CLIENT_NUM];
 	void *dfc_pending[MAX_CLIENT_NUM];
 	unsigned long ps_work_active;
-
-//	int ps_enabled;
 	bool ps_enabled;
 	bool dl_msg_active;
-
+	bool ps_ignore_grant;
 };
 
 enum data_ep_type_enum_v01 {
@@ -125,9 +121,11 @@ void dfc_qmi_burst_check(struct net_device *dev, struct qos_info *qos,
 
 int qmi_rmnet_flow_control(struct net_device *dev, u32 tcm_handle, int enable);
 
-void dfc_qmi_wq_flush(struct qmi_info *qmi);
-
 void dfc_qmi_query_flow(void *dfc_data);
+
+int dfc_bearer_flow_ctl(struct net_device *dev,
+			struct rmnet_bearer_map *bearer,
+			struct qos_info *qos);
 #else
 static inline struct rmnet_flow_map *
 qmi_rmnet_get_flow_map(struct qos_info *qos_info,
@@ -160,13 +158,16 @@ dfc_qmi_burst_check(struct net_device *dev, struct qos_info *qos,
 }
 
 static inline void
-dfc_qmi_wq_flush(struct qmi_info *qmi)
+dfc_qmi_query_flow(void *dfc_data)
 {
 }
 
-static inline void
-dfc_qmi_query_flow(void *dfc_data)
+static inline int
+dfc_bearer_flow_ctl(struct net_device *dev,
+		    struct rmnet_bearer_map *bearer,
+		    struct qos_info *qos)
 {
+	return 0;
 }
 #endif
 
@@ -175,6 +176,7 @@ int
 wda_qmi_client_init(void *port, struct svc_info *psvc, struct qmi_info *qmi);
 void wda_qmi_client_exit(void *wda_data);
 int wda_set_powersave_mode(void *wda_data, u8 enable);
+void qmi_rmnet_flush_ps_wq(void);
 #else
 static inline int
 wda_qmi_client_init(void *port, struct svc_info *psvc, struct qmi_info *qmi)
@@ -189,6 +191,9 @@ static inline void wda_qmi_client_exit(void *wda_data)
 static inline int wda_set_powersave_mode(void *wda_data, u8 enable)
 {
 	return -EINVAL;
+}
+static inline void qmi_rmnet_flush_ps_wq(void)
+{
 }
 #endif
 #endif /*_RMNET_QMI_I_H*/

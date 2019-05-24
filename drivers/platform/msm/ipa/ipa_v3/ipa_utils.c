@@ -4232,6 +4232,11 @@ int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl)
 		return -EPERM;
 	}
 
+	if (ipa3_ctx->ipa_endp_delay_wa) {
+		IPAERR("pipe setting delay is not supported\n");
+		return 0;
+	}
+
 	IPADBG("pipe=%d ep_suspend=%d, ep_delay=%d\n",
 		clnt_hdl,
 		ep_ctrl->ipa_ep_suspend,
@@ -5988,7 +5993,7 @@ int ipa3_is_vlan_mode(enum ipa_vlan_ifaces iface, bool *res)
 		return -EINVAL;
 	}
 
-	if (iface < 0 || iface > IPA_VLAN_IF_MAX) {
+	if (iface < 0 || iface >= IPA_VLAN_IF_MAX) {
 		IPAERR("invalid iface %d\n", iface);
 		return -EINVAL;
 	}
@@ -6823,7 +6828,11 @@ void ipa3_suspend_apps_pipes(bool suspend)
 					IPAERR("failed to stop WAN channel\n");
 					ipa_assert();
 				}
-			} else {
+			} else if (!atomic_read(&ipa3_ctx->is_ssr)) {
+				/* If SSR was alreday started not required to
+				 * start WAN channel,Because in SSR will stop
+				 * channel and reset the channel.
+				 */
 				res = gsi_start_channel(ep->gsi_chan_hdl);
 				if (res) {
 					IPAERR("failed to start WAN channel\n");
@@ -7444,27 +7453,27 @@ void ipa3_read_mailbox_17(enum uc_state state)
 	val = ipahal_read_reg_mn(IPA_UC_MAILBOX_m_n,
 			0,
 			17);
-		IPAERR_RL("GSI INTSET %d\n mailbox-17: 0x%x\n",
+		IPADBG_LOW("GSI INTSET %d\n mailbox-17: 0x%x\n",
 			ipa3_ctx->gsi_chk_intset_value,
 			val);
 	switch (state)	{
 	case IPA_PC_SAVE_CONTEXT_SAVE_ENTERED:
 		if (val != PC_SAVE_CONTEXT_SAVE_ENTERED) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_SAVE_CONTEXT_SAVE_ENTERED,
 				val);
 		}
 		break;
 	case IPA_PC_SAVE_CONTEXT_STATUS_SUCCESS:
 		if (val != PC_SAVE_CONTEXT_STATUS_SUCCESS) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_SAVE_CONTEXT_STATUS_SUCCESS,
 				val);
 		}
 		break;
 	case IPA_PC_RESTORE_CONTEXT_ENTERED:
 		if (val != PC_RESTORE_CONTEXT_ENTERED) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_RESTORE_CONTEXT_ENTERED,
 				val);
 		}
@@ -7473,7 +7482,7 @@ void ipa3_read_mailbox_17(enum uc_state state)
 			ipa3_ctx->uc_mailbox17_chk++;
 		if (val != PC_RESTORE_CONTEXT_STATUS_SUCCESS) {
 			ipa3_ctx->uc_mailbox17_mismatch++;
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_RESTORE_CONTEXT_STATUS_SUCCESS,
 				val);
 		}
