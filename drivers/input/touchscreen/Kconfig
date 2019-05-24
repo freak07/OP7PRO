@@ -1285,6 +1285,9 @@ config TOUCHSCREEN_SYNAPTICS_DSX
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 source "drivers/input/touchscreen/oneplus_touchscreen/Kconfig"
 
+config WAKE_GESTURES
+	bool "wake gestures"
+
 config TOUCHSCREEN_SYNAPTICS_TCM
 	bool "Synaptics TCM Touchscreen Driver"
 	depends on I2C
