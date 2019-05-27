@@ -35,9 +35,9 @@ ifeq ($(KERNEL_BUILD), 0)
 		INCS    +=  -include $(AUDIO_ROOT)/config/sm6150autoconf.h
 	endif
 	ifeq ($(CONFIG_ARCH_TRINKET), y)
-		include $(AUDIO_ROOT)/config/sm6150auto.conf
+		include $(AUDIO_ROOT)/config/trinketauto.conf
 		export
-		INCS    +=  -include $(AUDIO_ROOT)/config/sm6150autoconf.h
+		INCS    +=  -include $(AUDIO_ROOT)/config/trinketautoconf.h
 	endif
 	ifeq ($(CONFIG_ARCH_SM8150), y)
 		include $(AUDIO_ROOT)/config/sm8150auto.conf
@@ -103,6 +103,10 @@ ifdef CONFIG_SND_SOC_MSM_QDSP6V2_INTF
 	Q6_OBJS += avtimer.o
 	Q6_OBJS += q6_init.o
 
+ifdef CONFIG_XT_LOGGING
+	Q6_OBJS += sp_params.o
+endif
+
 endif
 ifdef CONFIG_SND_SOC_MSM_QDSP6V2_INTF
 	Q6_OBJS += apr_elliptic.o
@@ -139,6 +143,10 @@ endif
 
 ifdef CONFIG_MSM_MDF
 	Q6_OBJS += msm_mdf.o
+endif
+
+ifdef CONFIG_VOICE_MHI
+	Q6_OBJS += voice_mhi.o
 endif
 
 LINUX_INC +=	-Iinclude/linux
