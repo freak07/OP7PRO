@@ -11331,13 +11331,6 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 		return 0;
 
 	/*
-	 * Force higher capacity CPUs doing load balance, when the lower
-	 * capacity CPUs has some misfit tasks.
-	 */
-	if (!is_min_capacity_cpu(this_cpu) && min_cap_cluster_has_misfit_task())
-		force_lb = true;
-
-	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
 	 * measure the duration of idle_balance() as idle time.
 	 */
@@ -11348,6 +11341,13 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 */
 	if (!cpu_active(this_cpu))
 		return 0;
+
+	/*
+	 * Force higher capacity CPUs doing load balance, when the lower
+	 * capacity CPUs has some misfit tasks.
+	 */
+	if (!is_min_capacity_cpu(this_cpu) && min_cap_cluster_has_misfit_task())
+		force_lb = true;
 
 	/*
 	 * This is OK, because current is on_cpu, which avoids it being picked
