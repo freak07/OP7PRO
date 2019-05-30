@@ -136,6 +136,8 @@ static int one_thousand = 1000;
 static int two_million = 2000000;
 #endif
 
+static int max_swappiness = 200;
+
 /*dylanchang, 2019/4/30, add foreground task io opt*/
 unsigned int sysctl_fg_io_opt = 1;
 
@@ -1531,7 +1533,7 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
-		.extra2		= &one_hundred,
+		.extra2		= &max_swappiness,
 	},
 	{
 		.procname	= "breath_period",
