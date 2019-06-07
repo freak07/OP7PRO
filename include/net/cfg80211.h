@@ -53,6 +53,9 @@
 /* Indicate backport support for per chain rssi scan */
 #define CFG80211_SCAN_PER_CHAIN_RSSI_SUPPORT 1
 
+/* Indicate backport support for oce scan capability flags */
+#define CFG80211_SCAN_OCE_CAPABILITY_SUPPORT 1
+
 /**
  * DOC: Introduction
  *

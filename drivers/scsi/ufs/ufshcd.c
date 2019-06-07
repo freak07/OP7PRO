@@ -3540,10 +3540,11 @@ static int ufshcd_comp_devman_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 	u32 upiu_flags;
 	int ret = 0;
 
-	if (hba->ufs_version == UFSHCI_VERSION_20)
-		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
-	else
+	if ((hba->ufs_version == UFSHCI_VERSION_10) ||
+	    (hba->ufs_version == UFSHCI_VERSION_11))
 		lrbp->command_type = UTP_CMD_TYPE_DEV_MANAGE;
+	else
+		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
 
 	ret = ufshcd_prepare_req_desc_hdr(hba, lrbp, &upiu_flags,
 			DMA_NONE);
@@ -3568,10 +3569,11 @@ static int ufshcd_comp_scsi_upiu(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 	u32 upiu_flags;
 	int ret = 0;
 
-	if (hba->ufs_version == UFSHCI_VERSION_20)
-		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
-	else
+	if ((hba->ufs_version == UFSHCI_VERSION_10) ||
+	    (hba->ufs_version == UFSHCI_VERSION_11))
 		lrbp->command_type = UTP_CMD_TYPE_SCSI;
+	else
+		lrbp->command_type = UTP_CMD_TYPE_UFS_STORAGE;
 
 	if (likely(lrbp->cmd)) {
 		ret = ufshcd_prepare_req_desc_hdr(hba, lrbp,
@@ -4008,7 +4010,7 @@ static int ufshcd_wait_for_dev_cmd(struct ufs_hba *hba,
 		ufshcd_outstanding_req_clear(hba, lrbp->task_tag);
 	}
 
-	if (err)
+	if (err && err != -EAGAIN)
 		ufsdbg_set_err_state(hba);
 
 	return err;
@@ -5099,9 +5101,9 @@ int ufshcd_dme_set_attr(struct ufs_hba *hba, u32 attr_sel,
 	} while (ret && peer && --retries);
 
 	if (ret)
-		dev_err(hba->dev, "%s: attr-id 0x%x val 0x%x failed %d retries\n",
+		dev_err(hba->dev, "%s: attr-id 0x%x val 0x%x failed %d retries, err %d\n",
 			set, UIC_GET_ATTR_ID(attr_sel), mib_val,
-			UFS_UIC_COMMAND_RETRIES - retries);
+			UFS_UIC_COMMAND_RETRIES - retries, ret);
 
 	return ret;
 }
@@ -5627,7 +5629,7 @@ int ufshcd_change_power_mode(struct ufs_hba *hba,
 		/* INITIAL ADAPT */
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_TXHSADAPTTYPE),
 			       PA_INITIAL_ADAPT);
-	} else {
+	} else if (hba->ufs_version >= UFSHCI_VERSION_30) {
 		/* NO ADAPT */
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_TXHSADAPTTYPE), PA_NO_ADAPT);
 	}
@@ -8031,6 +8033,8 @@ static int ufshcd_reset_and_restore(struct ufs_hba *hba)
 	unsigned long flags;
 	int retries = MAX_HOST_RESET_RETRIES;
 
+	ufshcd_enable_irq(hba);
+
 	do {
 		err = ufshcd_detect_device(hba);
 	} while (err && --retries);
@@ -8185,19 +8189,19 @@ static u32 ufshcd_find_max_sup_active_icc_level(struct ufs_hba *hba,
 		goto out;
 	}
 
-	if (hba->vreg_info.vcc)
+	if (hba->vreg_info.vcc && hba->vreg_info.vcc->max_uA)
 		icc_level = ufshcd_get_max_icc_level(
 				hba->vreg_info.vcc->max_uA,
 				POWER_DESC_MAX_ACTV_ICC_LVLS - 1,
 				&desc_buf[PWR_DESC_ACTIVE_LVLS_VCC_0]);
 
-	if (hba->vreg_info.vccq)
+	if (hba->vreg_info.vccq && hba->vreg_info.vccq->max_uA)
 		icc_level = ufshcd_get_max_icc_level(
 				hba->vreg_info.vccq->max_uA,
 				icc_level,
 				&desc_buf[PWR_DESC_ACTIVE_LVLS_VCCQ_0]);
 
-	if (hba->vreg_info.vccq2)
+	if (hba->vreg_info.vccq2 && hba->vreg_info.vccq2->max_uA)
 		icc_level = ufshcd_get_max_icc_level(
 				hba->vreg_info.vccq2->max_uA,
 				icc_level,
@@ -8224,7 +8228,7 @@ static void ufshcd_set_active_icc_lvl(struct ufs_hba *hba)
 		dev_err(hba->dev,
 			"%s: Failed reading power descriptor.len = %d ret = %d",
 			__func__, buff_len, ret);
-		return;
+		goto out;
 	}
 
 	icc_level = ufshcd_find_max_sup_active_icc_level(hba, desc_buf,
@@ -8238,6 +8242,8 @@ static void ufshcd_set_active_icc_lvl(struct ufs_hba *hba)
 		dev_err(hba->dev,
 			"%s: Failed configuring bActiveICCLevel = %d ret = %d",
 			__func__, icc_level, ret);
+out:
+	kfree(desc_buf);
 }
 
 static int ufshcd_set_low_vcc_level(struct ufs_hba *hba,
@@ -8762,7 +8768,7 @@ static int ufshcd_get_dev_ref_clk_gating_wait(struct ufs_hba *hba,
 
 static int ufs_read_device_desc_data(struct ufs_hba *hba)
 {
-	int err;
+	int err = 0;
 	u8 *desc_buf = NULL;
 
 	if (hba->desc_size.dev_desc) {
@@ -8776,7 +8782,7 @@ static int ufs_read_device_desc_data(struct ufs_hba *hba)
 	}
 	err = ufshcd_read_device_desc(hba, desc_buf, hba->desc_size.dev_desc);
 	if (err)
-		return err;
+		goto out;
 
 	/*
 	 * getting vendor (manufacturerID) and Bank Index in big endian
@@ -8792,7 +8798,9 @@ static int ufs_read_device_desc_data(struct ufs_hba *hba)
 		desc_buf[DEVICE_DESC_PARAM_SPEC_VER] << 8 |
 		desc_buf[DEVICE_DESC_PARAM_SPEC_VER + 1];
 
-	return 0;
+out:
+	kfree(desc_buf);
+	return err;
 }
 
 /**
@@ -9320,7 +9328,7 @@ static int ufshcd_query_ioctl(struct ufs_hba *hba, u8 lun, void __user *buffer)
 		switch (ioctl_data->idn) {
 		case QUERY_ATTR_IDN_BOOT_LU_EN:
 			index = 0;
-			if (att > QUERY_ATTR_IDN_BOOT_LU_EN_MAX) {
+			if (!att || att > QUERY_ATTR_IDN_BOOT_LU_EN_MAX) {
 				dev_err(hba->dev,
 					"%s: Illegal ufs query ioctl data, opcode 0x%x, idn 0x%x, att 0x%x\n",
 					__func__, ioctl_data->opcode,
@@ -9480,6 +9488,15 @@ static int ufshcd_config_vreg_load(struct device *dev, struct ufs_vreg *vreg,
 	int ret;
 
 	if (!vreg)
+		return 0;
+
+	/*
+	 * "set_load" operation shall be required on those regulators
+	 * which specifically configured current limitation. Otherwise
+	 * zero max_uA may cause unexpected behavior when regulator is
+	 * enabled or set as high power mode.
+	 */
+	if (!vreg->max_uA)
 		return 0;
 
 	ret = regulator_set_load(vreg->reg, ua);
@@ -10561,6 +10578,8 @@ out:
 	trace_ufshcd_system_resume(dev_name(hba->dev), ret,
 		ktime_to_us(ktime_sub(ktime_get(), start)),
 		hba->curr_dev_pwr_mode, hba->uic_link_state);
+	if (!ret)
+		hba->is_sys_suspended = false;
 	return ret;
 }
 EXPORT_SYMBOL(ufshcd_system_resume);

@@ -937,6 +937,11 @@ static int gsi_startxfer_for_ep(struct usb_ep *ep)
 	struct dwc3_ep *dep = to_dwc3_ep(ep);
 	struct dwc3	*dwc = dep->dwc;
 
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		dbg_log_string("ep:%s disabled\n", ep->name);
+		return -ESHUTDOWN;
+	}
+
 	memset(&params, 0, sizeof(params));
 	params.param0 = GSI_TRB_ADDR_BIT_53_MASK | GSI_TRB_ADDR_BIT_55_MASK;
 	params.param0 |= (ep->ep_intr_num << 16);
@@ -972,11 +977,20 @@ static void gsi_store_ringbase_dbl_info(struct usb_ep *ep,
 		GSI_RING_BASE_ADDR_L(mdwc->gsi_reg[RING_BASE_ADDR_L], (n)),
 		dwc3_trb_dma_offset(dep, &dep->trb_pool[0]));
 
+	if (request->mapped_db_reg_phs_addr_lsb &&
+			dwc->sysdev != request->dev) {
+		dma_unmap_resource(request->dev,
+			request->mapped_db_reg_phs_addr_lsb,
+			PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+		request->mapped_db_reg_phs_addr_lsb = 0;
+	}
+
 	if (!request->mapped_db_reg_phs_addr_lsb) {
 		request->mapped_db_reg_phs_addr_lsb =
 			dma_map_resource(dwc->sysdev,
 				(phys_addr_t)request->db_reg_phs_addr_lsb,
 				PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+		request->dev = dwc->sysdev;
 		if (dma_mapping_error(dwc->sysdev,
 				request->mapped_db_reg_phs_addr_lsb))
 			dev_err(mdwc->dev, "mapping error for db_reg_phs_addr_lsb\n");
@@ -1111,6 +1125,11 @@ static int gsi_prepare_trbs(struct usb_ep *ep, struct usb_gsi_request *req)
 					: (req->num_bufs + 2);
 	struct scatterlist *sg;
 	struct sg_table *sgt;
+
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		dbg_log_string("ep:%s disabled\n", ep->name);
+		return -ESHUTDOWN;
+	}
 
 	dep->trb_pool = dma_zalloc_coherent(dwc->sysdev,
 				num_trbs * sizeof(struct dwc3_trb),

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -68,6 +68,8 @@ static u32 fw_version_ext;
 
 #define ICNSS_QUIRKS_DEFAULT		BIT(FW_REJUVENATE_ENABLE)
 #define ICNSS_MAX_PROBE_CNT		2
+
+#define PROBE_TIMEOUT			5000
 
 static struct icnss_priv *penv;
 
@@ -607,6 +609,21 @@ bool icnss_is_fw_ready(void)
 }
 EXPORT_SYMBOL(icnss_is_fw_ready);
 
+void icnss_block_shutdown(bool status)
+{
+	if (!penv)
+		return;
+
+	if (status) {
+		set_bit(ICNSS_BLOCK_SHUTDOWN, &penv->state);
+		reinit_completion(&penv->unblock_shutdown);
+	} else {
+		clear_bit(ICNSS_BLOCK_SHUTDOWN, &penv->state);
+		complete(&penv->unblock_shutdown);
+	}
+}
+EXPORT_SYMBOL(icnss_block_shutdown);
+
 bool icnss_is_fw_down(void)
 {
 	if (!penv)
@@ -626,6 +643,15 @@ bool icnss_is_rejuvenate(void)
 		return test_bit(ICNSS_REJUVENATE, &penv->state);
 }
 EXPORT_SYMBOL(icnss_is_rejuvenate);
+
+bool icnss_is_pdr(void)
+{
+	if (!penv)
+		return false;
+	else
+		return test_bit(ICNSS_PDR, &penv->state);
+}
+EXPORT_SYMBOL(icnss_is_pdr);
 
 int icnss_power_off(struct device *dev)
 {
@@ -663,14 +689,15 @@ static irqreturn_t fw_crash_indication_handler(int irq, void *ctx)
 	icnss_pr_err("Received early crash indication from FW\n");
 
 	if (priv) {
+		set_bit(ICNSS_FW_DOWN, &priv->state);
+		icnss_ignore_fw_timeout(true);
+
 		if (test_bit(ICNSS_FW_READY, &priv->state) &&
 		    !test_bit(ICNSS_DRIVER_UNLOADING, &priv->state)) {
 			fw_down_data.crashed = true;
 			icnss_call_driver_uevent(priv, ICNSS_UEVENT_FW_DOWN,
 						 &fw_down_data);
 		}
-		set_bit(ICNSS_FW_DOWN, &priv->state);
-		icnss_ignore_fw_timeout(true);
 	}
 
 	icnss_driver_event_post(ICNSS_DRIVER_EVENT_FW_EARLY_CRASH_IND,
@@ -909,6 +936,7 @@ static int icnss_call_driver_probe(struct icnss_priv *priv)
 
 	icnss_hw_power_on(priv);
 
+	icnss_block_shutdown(true);
 	while (probe_cnt < ICNSS_MAX_PROBE_CNT) {
 		ret = priv->ops->probe(&priv->pdev->dev);
 		probe_cnt++;
@@ -918,9 +946,11 @@ static int icnss_call_driver_probe(struct icnss_priv *priv)
 	if (ret < 0) {
 		icnss_pr_err("Driver probe failed: %d, state: 0x%lx, probe_cnt: %d\n",
 			     ret, priv->state, probe_cnt);
+		icnss_block_shutdown(false);
 		goto out;
 	}
 
+	icnss_block_shutdown(false);
 	set_bit(ICNSS_DRIVER_PROBED, &priv->state);
 
 	return 0;
@@ -958,9 +988,11 @@ static int icnss_pd_restart_complete(struct icnss_priv *priv)
 
 	icnss_call_driver_shutdown(priv);
 
+	clear_bit(ICNSS_PDR, &priv->state);
 	clear_bit(ICNSS_REJUVENATE, &priv->state);
 	clear_bit(ICNSS_PD_RESTART, &priv->state);
 	priv->early_crash_ind = false;
+	priv->is_ssr = false;
 
 	if (!priv->ops || !priv->ops->reinit)
 		goto out;
@@ -978,16 +1010,20 @@ static int icnss_pd_restart_complete(struct icnss_priv *priv)
 
 	icnss_hw_power_on(priv);
 
+	icnss_block_shutdown(true);
+
 	ret = priv->ops->reinit(&priv->pdev->dev);
 	if (ret < 0) {
 		icnss_fatal_err("Driver reinit failed: %d, state: 0x%lx\n",
 				ret, priv->state);
 		if (!priv->allow_recursive_recovery)
 			ICNSS_ASSERT(false);
+		icnss_block_shutdown(false);
 		goto out_power_off;
 	}
 
 out:
+	icnss_block_shutdown(false);
 	clear_bit(ICNSS_SHUTDOWN_DONE, &penv->state);
 	return 0;
 
@@ -1059,6 +1095,7 @@ static int icnss_driver_event_register_driver(void *data)
 	if (ret)
 		goto out;
 
+	icnss_block_shutdown(true);
 	while (probe_cnt < ICNSS_MAX_PROBE_CNT) {
 		ret = penv->ops->probe(&penv->pdev->dev);
 		probe_cnt++;
@@ -1068,9 +1105,11 @@ static int icnss_driver_event_register_driver(void *data)
 	if (ret) {
 		icnss_pr_err("Driver probe failed: %d, state: 0x%lx, probe_cnt: %d\n",
 			     ret, penv->state, probe_cnt);
+		icnss_block_shutdown(false);
 		goto power_off;
 	}
 
+	icnss_block_shutdown(false);
 	set_bit(ICNSS_DRIVER_PROBED, &penv->state);
 
 	return 0;
@@ -1089,8 +1128,13 @@ static int icnss_driver_event_unregister_driver(void *data)
 	}
 
 	set_bit(ICNSS_DRIVER_UNLOADING, &penv->state);
+
+	icnss_block_shutdown(true);
+
 	if (penv->ops)
 		penv->ops->remove(&penv->pdev->dev);
+
+	icnss_block_shutdown(false);
 
 	clear_bit(ICNSS_DRIVER_UNLOADING, &penv->state);
 	clear_bit(ICNSS_DRIVER_PROBED, &penv->state);
@@ -1150,7 +1194,8 @@ static int icnss_driver_event_pd_service_down(struct icnss_priv *priv,
 		goto out;
 	}
 
-	icnss_fw_crashed(priv, event_data);
+	if (!test_bit(ICNSS_PD_RESTART, &priv->state))
+		icnss_fw_crashed(priv, event_data);
 
 out:
 	kfree(data);
@@ -1295,6 +1340,15 @@ static int icnss_modem_notifier_nb(struct notifier_block *nb,
 	if (code != SUBSYS_BEFORE_SHUTDOWN)
 		return NOTIFY_OK;
 
+	priv->is_ssr = true;
+
+	if (code == SUBSYS_BEFORE_SHUTDOWN && !notif->crashed &&
+	    test_bit(ICNSS_BLOCK_SHUTDOWN, &priv->state)) {
+		if (!wait_for_completion_timeout(&priv->unblock_shutdown,
+						 PROBE_TIMEOUT))
+			icnss_pr_err("wlan driver probe timeout\n");
+	}
+
 	if (code == SUBSYS_BEFORE_SHUTDOWN && !notif->crashed) {
 		ret = wlfw_send_modem_shutdown_msg(priv);
 		if (ret < 0)
@@ -1412,6 +1466,9 @@ static int icnss_service_notifier_notify(struct notifier_block *nb,
 
 	if (notification != SERVREG_NOTIF_SERVICE_STATE_DOWN_V01)
 		goto done;
+
+	if (!priv->is_ssr)
+		set_bit(ICNSS_PDR, &priv->state);
 
 	event_data = kzalloc(sizeof(*event_data), GFP_KERNEL);
 
@@ -2079,7 +2136,6 @@ int icnss_trigger_recovery(struct device *dev)
 	if (test_bit(ICNSS_PD_RESTART, &priv->state)) {
 		icnss_pr_err("PD recovery already in progress: state: 0x%lx\n",
 			     priv->state);
-		ret = -EPERM;
 		goto out;
 	}
 
@@ -2605,6 +2661,12 @@ static int icnss_stats_show_state(struct seq_file *s, struct icnss_priv *priv)
 			continue;
 		case ICNSS_MODE_ON:
 			seq_puts(s, "MODE ON DONE");
+			continue;
+		case ICNSS_BLOCK_SHUTDOWN:
+			seq_puts(s, "BLOCK SHUTDOWN");
+			continue;
+		case ICNSS_PDR:
+			seq_puts(s, "PDR TRIGGERED");
 		}
 
 		seq_printf(s, "UNKNOWN-%d", i);
@@ -3231,6 +3293,8 @@ static int icnss_probe(struct platform_device *pdev)
 		 &dev_attr_cnss_version_information);
 	push_component_info(WCN, "WCN3998", "QualComm");
 
+	init_completion(&priv->unblock_shutdown);
+
 	icnss_pr_info("Platform driver probed successfully\n");
 
 	return 0;
@@ -3254,6 +3318,8 @@ static int icnss_remove(struct platform_device *pdev)
 	icnss_debugfs_destroy(penv);
 	device_remove_file(&penv->pdev->dev,
 		 &dev_attr_cnss_version_information);
+
+	complete_all(&penv->unblock_shutdown);
 
 	icnss_modem_ssr_unregister_notifier(penv);
 

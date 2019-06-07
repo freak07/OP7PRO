@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1512,12 +1512,14 @@ static int dp_panel_dsc_prepare_basic_params(
 	struct dp_dsc_slices_per_line *rec;
 	int slice_width;
 	u32 ppr = dp_mode->timing.pixel_clk_khz/1000;
+	int max_slice_width;
 
 	comp_info->dsc_info.slice_per_pkt = 0;
 	for (i = 0; i < ARRAY_SIZE(slice_per_line_tbl); i++) {
 		rec = &slice_per_line_tbl[i];
 		if ((ppr > rec->min_ppr) && (ppr <= rec->max_ppr)) {
 			comp_info->dsc_info.slice_per_pkt = rec->num_slices;
+			i++;
 			break;
 		}
 	}
@@ -1525,8 +1527,20 @@ static int dp_panel_dsc_prepare_basic_params(
 	if (comp_info->dsc_info.slice_per_pkt == 0)
 		return -EINVAL;
 
+	max_slice_width = dp_panel->dsc_dpcd[12] * 320;
 	slice_width = (dp_mode->timing.h_active /
 				comp_info->dsc_info.slice_per_pkt);
+
+	while (slice_width >= max_slice_width) {
+		if (i == ARRAY_SIZE(slice_per_line_tbl))
+			return -EINVAL;
+
+		rec = &slice_per_line_tbl[i];
+		comp_info->dsc_info.slice_per_pkt = rec->num_slices;
+		slice_width = (dp_mode->timing.h_active /
+				comp_info->dsc_info.slice_per_pkt);
+		i++;
+	}
 
 	comp_info->dsc_info.block_pred_enable =
 			dp_panel->sink_dsc_caps.block_pred_en;
@@ -2287,13 +2301,14 @@ static void dp_panel_edid_deregister(struct dp_panel_private *panel)
 
 static int dp_panel_set_stream_info(struct dp_panel *dp_panel,
 		enum dp_stream_id stream_id, u32 ch_start_slot,
-			u32 ch_tot_slots, u32 pbn)
+			u32 ch_tot_slots, u32 pbn, int vcpi)
 {
 	if (!dp_panel || stream_id > DP_STREAM_MAX) {
 		pr_err("invalid input. stream_id: %d\n", stream_id);
 		return -EINVAL;
 	}
 
+	dp_panel->vcpi = vcpi;
 	dp_panel->stream_id = stream_id;
 	dp_panel->channel_start_slot = ch_start_slot;
 	dp_panel->channel_total_slots = ch_tot_slots;
@@ -2358,7 +2373,7 @@ static int dp_panel_deinit_panel_info(struct dp_panel *dp_panel, u32 flags)
 	if (!panel->custom_edid && dp_panel->edid_ctrl->edid)
 		sde_free_edid((void **)&dp_panel->edid_ctrl);
 
-	dp_panel_set_stream_info(dp_panel, DP_STREAM_MAX, 0, 0, 0);
+	dp_panel_set_stream_info(dp_panel, DP_STREAM_MAX, 0, 0, 0, 0);
 	memset(&dp_panel->pinfo, 0, sizeof(dp_panel->pinfo));
 	memset(&hdr->hdr_meta, 0, sizeof(hdr->hdr_meta));
 	panel->panel_on = false;
@@ -2576,47 +2591,22 @@ static void dp_panel_config_misc(struct dp_panel *dp_panel)
 	catalog->config_misc(catalog);
 }
 
-static bool dp_panel_use_fixed_nvid(struct dp_panel *dp_panel)
-{
-	u8 *dpcd = dp_panel->dpcd;
-	struct sde_connector *c_conn = to_sde_connector(dp_panel->connector);
-
-	/* use fixe mvid and nvid for MST streams */
-	if (c_conn->mst_port)
-		return true;
-
-	/*
-	 * For better interop experience, used a fixed NVID=0x8000
-	 * whenever connected to a VGA dongle downstream.
-	 */
-	if (dpcd[DP_DOWNSTREAMPORT_PRESENT] & DP_DWN_STRM_PORT_PRESENT) {
-		u8 type = dpcd[DP_DOWNSTREAMPORT_PRESENT] &
-			DP_DWN_STRM_PORT_TYPE_MASK;
-		if (type == DP_DWN_STRM_PORT_TYPE_ANALOG)
-			return true;
-	}
-
-	return false;
-}
-
 static void dp_panel_config_msa(struct dp_panel *dp_panel)
 {
 	struct dp_panel_private *panel;
 	struct dp_catalog_panel *catalog;
 	u32 rate;
 	u32 stream_rate_khz;
-	bool fixed_nvid;
 
 	panel = container_of(dp_panel, struct dp_panel_private, dp_panel);
 	catalog = panel->catalog;
 
 	catalog->widebus_en = dp_panel->widebus_en;
 
-	fixed_nvid = dp_panel_use_fixed_nvid(dp_panel);
 	rate = drm_dp_bw_code_to_link_rate(panel->link->link_params.bw_code);
 	stream_rate_khz = dp_panel->pinfo.pixel_clk_khz;
 
-	catalog->config_msa(catalog, rate, stream_rate_khz, fixed_nvid);
+	catalog->config_msa(catalog, rate, stream_rate_khz);
 }
 
 static int dp_panel_hw_cfg(struct dp_panel *dp_panel, bool enable)
@@ -2831,6 +2821,8 @@ struct dp_panel *dp_panel_get(struct dp_panel_in *in)
 	if (in->base_panel) {
 		memcpy(dp_panel->dpcd, in->base_panel->dpcd,
 				DP_RECEIVER_CAP_SIZE + 1);
+		memcpy(dp_panel->dsc_dpcd, in->base_panel->dsc_dpcd,
+				DP_RECEIVER_DSC_CAP_SIZE + 1);
 		memcpy(&dp_panel->link_info, &in->base_panel->link_info,
 				sizeof(dp_panel->link_info));
 		dp_panel->mst_state = in->base_panel->mst_state;

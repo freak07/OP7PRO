@@ -339,8 +339,10 @@ static void dwc3_free_event_buffers(struct dwc3 *dwc)
 	struct dwc3_event_buffer	*evt;
 
 	evt = dwc->ev_buf;
-	if (evt)
+	if (evt) {
 		dwc3_free_one_event_buffer(dwc, evt);
+		dwc->ev_buf = NULL;
+	}
 
 	/* free GSI related event buffers */
 	dwc3_notify_event(dwc, DWC3_GSI_EVT_BUF_FREE, 0);
@@ -1077,7 +1079,7 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 	u8			hird_threshold;
 
 	/* default to highest possible threshold */
-	lpm_nyet_threshold = 0xff;
+	lpm_nyet_threshold = 0xf;
 
 	/* default to -3.5dB de-emphasis */
 	tx_de_emphasis = 1;

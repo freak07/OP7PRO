@@ -717,8 +717,11 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 	for (j = 0; j < config->groups; ++j) {
 		for (i = 0; i < len; ++i) {
 			if (config->return_buf[i] !=
-				config->status_value[group + i])
+				config->status_value[group + i]) {
+				DRM_ERROR("mismatch: 0x%x\n",
+					  config->return_buf[i]);
 				break;
+			}
 		}
 
 		if (i == len)
@@ -1379,7 +1382,19 @@ static void _dsi_display_continuous_clk_ctrl(struct dsi_display *display,
 
 	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
-		dsi_ctrl_set_continuous_clk(ctrl->ctrl, enable);
+
+		/**
+		 * For phy ver 4.0 chipsets, configure DSI controller and
+		 * DSI PHY to force clk lane to HS mode always whereas
+		 * for other phy ver chipsets, configure DSI controller only.
+		 */
+		if (ctrl->phy->hw.ops.set_continuous_clk) {
+			dsi_ctrl_hs_req_sel(ctrl->ctrl, true);
+			dsi_ctrl_set_continuous_clk(ctrl->ctrl, enable);
+			dsi_phy_set_continuous_clk(ctrl->phy, enable);
+		} else {
+			dsi_ctrl_set_continuous_clk(ctrl->ctrl, enable);
+		}
 	}
 }
 
@@ -2841,7 +2856,9 @@ static int dsi_display_ctrl_init(struct dsi_display *display)
 	} else {
 		display_for_each_ctrl(i, display) {
 			ctrl = &display->ctrl[i];
-			rc = dsi_ctrl_update_host_init_state(ctrl->ctrl, true);
+			rc = dsi_ctrl_update_host_state(ctrl->ctrl,
+							DSI_CTRL_OP_HOST_INIT,
+							true);
 			if (rc)
 				pr_debug("host init update failed rc=%d\n", rc);
 		}
@@ -2925,6 +2942,25 @@ static int dsi_display_ctrl_host_disable(struct dsi_display *display)
 	struct dsi_display_ctrl *m_ctrl, *ctrl;
 
 	m_ctrl = &display->ctrl[display->cmd_master_idx];
+	/*
+	 * For platforms where ULPS is controlled by DSI controller block,
+	 * do not disable dsi controller block if lanes are to be
+	 * kept in ULPS during suspend. So just update the SW state
+	 * and return early.
+	 */
+	if (display->panel->ulps_suspend_enabled &&
+	    !m_ctrl->phy->hw.ops.ulps_ops.ulps_request) {
+		display_for_each_ctrl(i, display) {
+			ctrl = &display->ctrl[i];
+			rc = dsi_ctrl_update_host_state(ctrl->ctrl,
+							DSI_CTRL_OP_HOST_ENGINE,
+							false);
+			if (rc)
+				pr_debug("host state update failed %d\n", rc);
+		}
+		return rc;
+	}
+
 	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (!ctrl->ctrl || (ctrl == m_ctrl))
@@ -4248,72 +4284,72 @@ static int dsi_display_update_dsi_bitrate(struct dsi_display *display,
 
 	pr_debug("%s:bit rate:%d\n", __func__, bit_clk_rate);
 	if (!display->panel) {
-	pr_err("Invalid params\n");
-	return -EINVAL;
+		pr_err("Invalid params\n");
+		return -EINVAL;
 	}
 
 	if (bit_clk_rate == 0) {
-	pr_err("Invalid bit clock rate\n");
-	return -EINVAL;
+		pr_err("Invalid bit clock rate\n");
+		return -EINVAL;
 	}
 
 	display->config.bit_clk_rate_hz = bit_clk_rate;
 
-	for (i = 0; i < display->ctrl_count; i++) {
-	struct dsi_display_ctrl *dsi_disp_ctrl = &display->ctrl[i];
-	struct dsi_ctrl *ctrl = dsi_disp_ctrl->ctrl;
-	u32 num_of_lanes = 0, bpp;
-	u64 bit_rate, pclk_rate, bit_rate_per_lane, byte_clk_rate;
-	struct dsi_host_common_cfg *host_cfg;
+	display_for_each_ctrl(i, display) {
+		struct dsi_display_ctrl *dsi_disp_ctrl = &display->ctrl[i];
+		struct dsi_ctrl *ctrl = dsi_disp_ctrl->ctrl;
+		u32 num_of_lanes = 0, bpp;
+		u64 bit_rate, pclk_rate, bit_rate_per_lane, byte_clk_rate;
+		struct dsi_host_common_cfg *host_cfg;
 
-	mutex_lock(&ctrl->ctrl_lock);
+		mutex_lock(&ctrl->ctrl_lock);
 
-	host_cfg = &display->panel->host_config;
-	if (host_cfg->data_lanes & DSI_DATA_LANE_0)
-		num_of_lanes++;
-	if (host_cfg->data_lanes & DSI_DATA_LANE_1)
-		num_of_lanes++;
-	if (host_cfg->data_lanes & DSI_DATA_LANE_2)
-		num_of_lanes++;
-	if (host_cfg->data_lanes & DSI_DATA_LANE_3)
-		num_of_lanes++;
+		host_cfg = &display->panel->host_config;
+		if (host_cfg->data_lanes & DSI_DATA_LANE_0)
+			num_of_lanes++;
+		if (host_cfg->data_lanes & DSI_DATA_LANE_1)
+			num_of_lanes++;
+		if (host_cfg->data_lanes & DSI_DATA_LANE_2)
+			num_of_lanes++;
+		if (host_cfg->data_lanes & DSI_DATA_LANE_3)
+			num_of_lanes++;
 
-	if (num_of_lanes == 0) {
-		pr_err("Invalid lane count\n");
-		rc = -EINVAL;
-		goto error;
-	}
+		if (num_of_lanes == 0) {
+			pr_err("Invalid lane count\n");
+			rc = -EINVAL;
+			goto error;
+		}
 
-	bpp = dsi_pixel_format_to_bpp(host_cfg->dst_format);
+		bpp = dsi_pixel_format_to_bpp(host_cfg->dst_format);
 
-	bit_rate = display->config.bit_clk_rate_hz * num_of_lanes;
-	bit_rate_per_lane = bit_rate;
-	do_div(bit_rate_per_lane, num_of_lanes);
-	pclk_rate = bit_rate;
-	do_div(pclk_rate, bpp);
-	byte_clk_rate = bit_rate_per_lane;
-	do_div(byte_clk_rate, 8);
-	pr_debug("bit_clk_rate = %llu, bit_clk_rate_per_lane = %llu\n",
-	bit_rate, bit_rate_per_lane);
-	pr_debug("byte_clk_rate = %llu, pclk_rate = %llu\n",
-	byte_clk_rate, pclk_rate);
+		bit_rate = display->config.bit_clk_rate_hz * num_of_lanes;
+		bit_rate_per_lane = bit_rate;
+		do_div(bit_rate_per_lane, num_of_lanes);
+		pclk_rate = bit_rate;
+		do_div(pclk_rate, bpp);
+		byte_clk_rate = bit_rate_per_lane;
+		do_div(byte_clk_rate, 8);
+		pr_debug("bit_clk_rate = %llu, bit_clk_rate_per_lane = %llu\n",
+		bit_rate, bit_rate_per_lane);
+		pr_debug("byte_clk_rate = %llu, pclk_rate = %llu\n",
+		byte_clk_rate, pclk_rate);
 
-	ctrl->clk_freq.byte_clk_rate = byte_clk_rate;
-	ctrl->clk_freq.pix_clk_rate = pclk_rate;
-	rc = dsi_clk_set_link_frequencies(display->dsi_clk_handle,
-			ctrl->clk_freq, ctrl->cell_index);
-	if (rc) {
-	pr_err("Failed to update link frequencies\n");
-		goto error;
-	}
+		ctrl->clk_freq.byte_clk_rate = byte_clk_rate;
+		ctrl->clk_freq.pix_clk_rate = pclk_rate;
+		rc = dsi_clk_set_link_frequencies(display->dsi_clk_handle,
+				ctrl->clk_freq, ctrl->cell_index);
+		if (rc) {
+			pr_err("Failed to update link frequencies\n");
+			goto error;
+		}
 
-	ctrl->host_config.bit_clk_rate_hz = bit_clk_rate;
+		ctrl->host_config.bit_clk_rate_hz = bit_clk_rate;
 error:
-	mutex_unlock(&ctrl->ctrl_lock);
+		(&ctrl->ctrl_lock);
 
-	/* TODO: recover ctrl->clk_freq in case of failure */
-	if (rc)
-	return rc;
+		/* TODO: recover ctrl->clk_freq in case of failure */
+		if (rc)
+			return rc;
 	}
 
 	return 0;
@@ -4421,8 +4457,7 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 		goto exit;
 	}
 
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (!ctrl->ctrl)
 			continue;
@@ -4440,8 +4475,7 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 		}
 	}
 
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (ctrl == m_ctrl)
 			continue;
@@ -4450,8 +4484,7 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 	dsi_phy_dynamic_refresh_trigger(m_ctrl->phy, true);
 
 	/* wait for dynamic refresh done */
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		rc = dsi_ctrl_wait4dynamic_refresh_done(ctrl->ctrl);
 		if (rc) {
@@ -4463,8 +4496,7 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 		}
 	}
 
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		dsi_phy_dynamic_refresh_clear(ctrl->phy);
 	}
@@ -4479,8 +4511,7 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 	return rc;
 
 recover_pix_clk:
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (!ctrl->ctrl)
 			continue;
@@ -4489,8 +4520,7 @@ recover_pix_clk:
 	}
 
 recover_byte_clk:
-	for (i = 0; (i < display->ctrl_count) &&
-	     (i < MAX_DSI_CTRLS_PER_DISPLAY); i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (!ctrl->ctrl)
 			continue;
@@ -4524,7 +4554,7 @@ static int dsi_display_dynamic_clk_switch_vid(struct dsi_display *display,
 	dsi_display_mask_ctrl_error_interrupts(display, mask, true);
 
 	/* update the phy timings based on new mode */
-	for (i = 0; i < display->ctrl_count; i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		dsi_phy_update_phy_timings(ctrl->phy, &display->config);
 	}
@@ -4544,7 +4574,7 @@ static int dsi_display_dynamic_clk_switch_vid(struct dsi_display *display,
 	_dsi_display_calc_pipe_delay(display, &delay, mode);
 
 	/* configure dynamic refresh ctrl registers */
-	for (i = 0; i < display->ctrl_count; i++) {
+	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
 		if (!ctrl->phy)
 			continue;
@@ -5172,7 +5202,7 @@ static ssize_t sysfs_dynamic_dsi_clk_read(struct device *dev,
 static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
-	int rc = count;
+	int rc = 0;
 	int clk_rate;
 	struct dsi_display *display;
 
@@ -5201,6 +5231,8 @@ static ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
 	rc = dsi_display_dynamic_clk_configure_cmd(display, clk_rate);
 	if (rc)
 		pr_err("Failed to configure dynamic clk\n");
+	else
+		rc = count;
 
 	mutex_unlock(&dsi_display_clk_mutex);
 	mutex_unlock(&display->display_lock);
@@ -6109,7 +6141,7 @@ static struct dsi_display_ext_bridge *dsi_display_ext_get_bridge(
 		sde_conn = to_sde_connector(conn_iter);
 		if (sde_conn->encoder == bridge->encoder) {
 			display = sde_conn->display;
-			for (i = 0; i < display->ctrl_count; i++) {
+			display_for_each_ctrl(i, display) {
 				if (display->ext_bridge[i].bridge == bridge)
 					return &display->ext_bridge[i];
 			}
@@ -6282,6 +6314,9 @@ int dsi_display_drm_ext_bridge_init(struct dsi_display *display,
 
 		/* return if ext bridge is already initialized */
 		if (ext_bridge_info->bridge)
+			return 0;
+
+ 		if (!display->panel->host_config.ext_bridge_mode)
 			return 0;
 
 		ext_bridge = of_drm_find_bridge(ext_bridge_info->node_of);
@@ -7382,7 +7417,8 @@ int dsi_display_prepare(struct dsi_display *display)
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
 		if (display->is_cont_splash_enabled) {
 			pr_err("DMS is not supposed to be set on first frame\n");
-			return -EINVAL;
+			rc = -EINVAL;
+			goto error;
 		}
 		/* update dsi ctrl for new mode */
 		rc = dsi_display_pre_switch(display);
@@ -7578,7 +7614,7 @@ static int dsi_display_qsync(struct dsi_display *display, bool enable)
 
 	mutex_lock(&display->display_lock);
 
-	for (i = 0; i < display->ctrl_count; i++) {
+	display_for_each_ctrl(i, display) {
 
 		if (enable) {
 			/* send the commands to enable qsync */

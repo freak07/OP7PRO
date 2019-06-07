@@ -49,6 +49,10 @@
 
 #define MAX_SSID_PER_RANGE	200
 
+#define NUM_CHANNEL_BUFFERS		2
+#define BUF_1_INDEX		0
+#define BUF_2_INDEX		1
+
 #define ALL_PROC		-1
 
 #define REMOTE_DATA		4
@@ -292,6 +296,7 @@ do {						\
 #define DIAG_CNTL_TYPE		2
 #define DIAG_DCI_TYPE		3
 
+#define MAX_DCI_CLIENTS		10
 /*
  * List of diag ids
  * 0 is reserved for unknown diag id, 1 for apps, diag ids
@@ -595,8 +600,9 @@ struct diagchar_dev {
 	struct list_head dci_req_list;
 	struct list_head dci_client_list;
 	int dci_tag;
-	int dci_client_id;
+	int dci_client_id[MAX_DCI_CLIENTS];
 	struct mutex dci_mutex;
+	struct mutex rpmsginfo_mutex[NUM_PERIPHERALS];
 	int num_dci_client;
 	unsigned char *apps_dci_buf;
 	int dci_state;
@@ -612,6 +618,7 @@ struct diagchar_dev {
 	unsigned int poolsize_hdlc;
 	unsigned int poolsize_dci;
 	unsigned int poolsize_user;
+	spinlock_t diagmem_lock;
 	/* Buffers for masks */
 	struct mutex diag_cntl_mutex;
 	/* Members for Sending response */
