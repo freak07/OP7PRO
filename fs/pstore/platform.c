@@ -597,14 +597,31 @@ static void pstore_unregister_kmsg(void)
 #ifdef CONFIG_PSTORE_CONSOLE
 static void pstore_console_write(struct console *con, const char *s, unsigned c)
 {
-	struct pstore_record record;
+	const char *e = s + c;
 
-	pstore_record_init(&record, psinfo);
-	record.type = PSTORE_TYPE_CONSOLE;
+	while (s < e) {
+		struct pstore_record record;
+		unsigned long flags;
 
-	record.buf = (char *)s;
-	record.size = c;
-	psinfo->write(&record);
+		pstore_record_init(&record, psinfo);
+		record.type = PSTORE_TYPE_CONSOLE;
+
+		if (c > psinfo->bufsize)
+			c = psinfo->bufsize;
+
+		if (oops_in_progress) {
+			if (!spin_trylock_irqsave(&psinfo->buf_lock, flags))
+				break;
+		} else {
+			spin_lock_irqsave(&psinfo->buf_lock, flags);
+		}
+		record.buf = (char *)s;
+		record.size = c;
+		psinfo->write(&record);
+		spin_unlock_irqrestore(&psinfo->buf_lock, flags);
+		s += c;
+		c = e - s;
+	}
 }
 
 static void  pstore_console_init(void )
