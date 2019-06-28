@@ -203,7 +203,6 @@ static void oneplus_motor_notify_state(unsigned long val)
     motor_notifier_call_chain(val);
 }
 
-#ifdef CONFIG_DRM_MSM
 static int fb_notifier_callback(struct notifier_block* nb, unsigned long event, void* data)
 {
 	int blank;
@@ -228,34 +227,8 @@ static int fb_notifier_callback(struct notifier_block* nb, unsigned long event, 
 			MOTOR_LOG("receives wrong data EARLY_BLANK:%d \n", blank);
 		}
 	}
-
-	return 0;
+	return NOTIFY_OK;
 }
-#else
-static int fb_notifier_callback(struct notifier_block* nb, unsigned long event, void* data)
-{
-	int blank;
-	struct fb_event* evdata = data;
-
-	if (g_the_chip == NULL) {
-		return 0;
-	}
-
-	if (evdata && evdata->data) {
-		if (event == FB_EVENT_BLANK) {
-			blank =* (int* )evdata->data;
-			if (blank == FB_BLANK_UNBLANK) {
-				g_the_chip->led_on = true;
-				MOTOR_LOG("led_on %d\n", g_the_chip->led_on);
-			} else if (blank == FB_BLANK_POWERDOWN) {
-				g_the_chip->led_on = false;
-				MOTOR_LOG("led_on %d\n", g_the_chip->led_on);
-			}
-		}
-	}
-	return 0;
-}
-#endif /*CONFIG_DRM_MSM*/
 
 /*********************************************************************
 						 digital_hall control interface
