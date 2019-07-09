@@ -1631,7 +1631,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 					rc = cam_sensor_update_power_settings(
 					    cmd_buf,
 					    total_cmd_buf_in_bytes,
-					    power_info);
+					    power_info, remain_len);
 					if (!rc){
 					    CAM_ERR(CAM_OIS, "cam_sensor_update_power_settings successfully");
 					} else {
