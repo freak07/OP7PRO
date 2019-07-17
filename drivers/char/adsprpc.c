@@ -1437,12 +1437,10 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 
 		mutex_lock(&ctx->fl->map_mutex);
 		if (ctx->fds && (ctx->fds[i] != -1))
-			err = fastrpc_mmap_create(ctx->fl, ctx->fds[i],
+			fastrpc_mmap_create(ctx->fl, ctx->fds[i],
 					ctx->attrs[i], buf, len,
 					mflags, &ctx->maps[i]);
 		mutex_unlock(&ctx->fl->map_mutex);
-		if (err)
-			goto bail;
 		ipage += 1;
 	}
 	PERF_END);
@@ -1453,10 +1451,9 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 
 		if (ctx->attrs && (ctx->attrs[i] & FASTRPC_ATTR_NOMAP))
 			dmaflags = FASTRPC_DMAHANDLE_NOMAP;
-		if (ctx->fds && (ctx->fds[i] != -1))
-			err = fastrpc_mmap_create(ctx->fl, ctx->fds[i],
-					FASTRPC_ATTR_NOVA, 0, 0, dmaflags,
-					&ctx->maps[i]);
+		VERIFY(err, !fastrpc_mmap_create(ctx->fl, ctx->fds[i],
+				FASTRPC_ATTR_NOVA, 0, 0, dmaflags,
+				&ctx->maps[i]));
 		if (err) {
 			mutex_unlock(&ctx->fl->map_mutex);
 			goto bail;
