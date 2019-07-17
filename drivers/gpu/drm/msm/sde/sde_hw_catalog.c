@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -131,6 +131,8 @@
 		"NV12/5/1/1.25 AB24/5/1/1.25 XB24/5/1/1.25"
 #define DEFAULT_MAX_PER_PIPE_BW			2400000
 #define DEFAULT_AMORTIZABLE_THRESHOLD		25
+#define DEFAULT_MNOC_PORTS			2
+#define DEFAULT_AXI_BUS_WIDTH			32
 #define DEFAULT_CPU_MASK			0
 #define DEFAULT_CPU_DMA_LATENCY			PM_QOS_DEFAULT_VALUE
 
@@ -168,6 +170,7 @@ enum sde_prop {
 	UBWC_BW_CALC_VERSION,
 	PIPE_ORDER_VERSION,
 	SEC_SID_MASK,
+	LINE_INSERTION,
 	SDE_PROP_MAX,
 };
 
@@ -203,6 +206,8 @@ enum {
 	PERF_CPU_DMA_LATENCY,
 	PERF_QOS_LUT_MACROTILE_QSEED,
 	PERF_SAFE_LUT_MACROTILE_QSEED,
+	PERF_NUM_MNOC_PORTS,
+	PERF_AXI_BUS_WIDTH,
 	PERF_PROP_MAX,
 };
 
@@ -447,6 +452,7 @@ static struct sde_prop_type sde_prop[] = {
 	{PIPE_ORDER_VERSION, "qcom,sde-pipe-order-version", false,
 			PROP_TYPE_U32},
 	{SEC_SID_MASK, "qcom,sde-secure-sid-mask", false, PROP_TYPE_U32_ARRAY},
+	{LINE_INSERTION, "qcom,sde-has-line-insertion", false, PROP_TYPE_BOOL},
 };
 
 static struct sde_prop_type sde_perf_prop[] = {
@@ -504,6 +510,10 @@ static struct sde_prop_type sde_perf_prop[] = {
 			false, PROP_TYPE_U32_ARRAY},
 	{PERF_SAFE_LUT_MACROTILE_QSEED, "qcom,sde-safe-lut-macrotile-qseed",
 			false, PROP_TYPE_U32_ARRAY},
+	{PERF_NUM_MNOC_PORTS, "qcom,sde-num-mnoc-ports",
+			false, PROP_TYPE_U32},
+	{PERF_AXI_BUS_WIDTH, "qcom,sde-axi-bus-width",
+			false, PROP_TYPE_U32},
 };
 
 static struct sde_prop_type sspp_prop[] = {
@@ -699,6 +709,11 @@ static struct sde_prop_type reg_dma_prop[REG_DMA_PROP_MAX] = {
 static struct sde_prop_type merge_3d_prop[] = {
 	{HW_OFF, "qcom,sde-merge-3d-off", false, PROP_TYPE_U32_ARRAY},
 	{HW_LEN, "qcom,sde-merge-3d-size", false, PROP_TYPE_U32},
+};
+
+static struct sde_prop_type qdss_prop[] = {
+	{HW_OFF, "qcom,sde-qdss-off", false, PROP_TYPE_U32_ARRAY},
+	{HW_LEN, "qcom,sde-qdss-size", false, PROP_TYPE_U32},
 };
 
 static struct sde_prop_type inline_rot_prop[INLINE_ROT_PROP_MAX] = {
@@ -1396,6 +1411,9 @@ static int sde_sspp_parse_dt(struct device_node *np,
 			set_bit(SDE_SSPP_TS_PREFILL, &sspp->features);
 			set_bit(SDE_SSPP_TS_PREFILL_REC1, &sspp->features);
 		}
+
+		if (sde_cfg->has_line_insertion)
+			set_bit(SDE_SSPP_LINE_INSERTION, &sspp->features);
 
 		sblk->smart_dma_priority =
 			PROP_VALUE_ACCESS(prop_value, SSPP_SMART_DMA, i);
@@ -3054,6 +3072,8 @@ static int sde_parse_dt(struct device_node *np, struct sde_mdss_cfg *cfg)
 	cfg->has_idle_pc = PROP_VALUE_ACCESS(prop_value, IDLE_PC, 0);
 	cfg->pipe_order_type = PROP_VALUE_ACCESS(prop_value,
 		PIPE_ORDER_VERSION, 0);
+	cfg->has_line_insertion = PROP_VALUE_ACCESS(prop_value,
+		LINE_INSERTION, 0);
 end:
 	kfree(prop_value);
 	return rc;
@@ -3264,6 +3284,16 @@ static int sde_perf_parse_dt(struct device_node *np, struct sde_mdss_cfg *cfg)
 			PROP_VALUE_ACCESS(prop_value,
 					PERF_AMORTIZABLE_THRESHOLD, 0) :
 			DEFAULT_AMORTIZABLE_THRESHOLD;
+	cfg->perf.num_mnoc_ports =
+			prop_exists[PERF_NUM_MNOC_PORTS] ?
+			PROP_VALUE_ACCESS(prop_value,
+				PERF_NUM_MNOC_PORTS, 0) :
+			DEFAULT_MNOC_PORTS;
+	cfg->perf.axi_bus_width =
+			prop_exists[PERF_AXI_BUS_WIDTH] ?
+			PROP_VALUE_ACCESS(prop_value,
+				PERF_AXI_BUS_WIDTH, 0) :
+			DEFAULT_AXI_BUS_WIDTH;
 
 	if (prop_exists[PERF_DANGER_LUT] && prop_count[PERF_DANGER_LUT] <=
 			SDE_QOS_LUT_USAGE_MAX) {
@@ -3420,15 +3450,17 @@ static int sde_parse_merge_3d_dt(struct device_node *np,
 	rc = _validate_dt_entry(np, merge_3d_prop, ARRAY_SIZE(merge_3d_prop),
 		prop_count, &off_count);
 	if (rc)
-		goto error;
+		goto end;
 
 	sde_cfg->merge_3d_count = off_count;
 
 	rc = _read_dt_entry(np, merge_3d_prop, ARRAY_SIZE(merge_3d_prop),
 			prop_count,
 			prop_exists, prop_value);
-	if (rc)
-		goto error;
+	if (rc) {
+		sde_cfg->merge_3d_count = 0;
+		goto end;
+	}
 
 	for (i = 0; i < off_count; i++) {
 		merge_3d = sde_cfg->merge_3d + i;
@@ -3439,11 +3471,59 @@ static int sde_parse_merge_3d_dt(struct device_node *np,
 		merge_3d->len = PROP_VALUE_ACCESS(prop_value, HW_LEN, 0);
 	}
 
-	return 0;
-error:
-	sde_cfg->merge_3d_count = 0;
+end:
 	kfree(prop_value);
 fail:
+	return rc;
+}
+
+static int sde_qdss_parse_dt(struct device_node *np,
+				struct sde_mdss_cfg *sde_cfg)
+{
+	int rc, prop_count[HW_PROP_MAX], i;
+	struct sde_prop_value *prop_value = NULL;
+	bool prop_exists[HW_PROP_MAX];
+	u32 off_count;
+	struct sde_qdss_cfg *qdss;
+
+	if (!sde_cfg) {
+		SDE_ERROR("invalid argument\n");
+		rc = -EINVAL;
+		goto end;
+	}
+
+	prop_value = kzalloc(HW_PROP_MAX *
+			sizeof(struct sde_prop_value), GFP_KERNEL);
+	if (!prop_value) {
+		rc = -ENOMEM;
+		goto end;
+	}
+
+	rc = _validate_dt_entry(np, qdss_prop, ARRAY_SIZE(qdss_prop),
+			prop_count, &off_count);
+	if (rc) {
+		sde_cfg->qdss_count = 0;
+		goto end;
+	}
+
+	sde_cfg->qdss_count = off_count;
+
+	rc = _read_dt_entry(np, qdss_prop, ARRAY_SIZE(qdss_prop), prop_count,
+			prop_exists, prop_value);
+	if (rc)
+		goto end;
+
+	for (i = 0; i < off_count; i++) {
+		qdss = sde_cfg->qdss + i;
+		qdss->base = PROP_VALUE_ACCESS(prop_value, HW_OFF, i);
+		qdss->id = QDSS_0 + i;
+		snprintf(qdss->name, SDE_HW_BLK_NAME_LEN, "qdss_%u",
+				qdss->id - QDSS_0);
+		qdss->len = PROP_VALUE_ACCESS(prop_value, HW_LEN, 0);
+	}
+
+end:
+	kfree(prop_value);
 	return rc;
 }
 
@@ -3523,7 +3603,8 @@ static int sde_hardware_format_caps(struct sde_mdss_cfg *sde_cfg,
 		sde_cfg->has_hdr = true;
 
 	/* Disable HDR for SM6150 target only */
-	if (IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_530))
+	if (IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_530)
+			|| IS_SDE_MAJOR_MINOR_SAME((hw_rev), SDE_HW_VER_540))
 		sde_cfg->has_hdr = false;
 
 	index = sde_copy_formats(sde_cfg->dma_formats, dma_list_size,
@@ -3641,6 +3722,17 @@ static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 		sde_cfg->sui_misr_supported = true;
 		sde_cfg->sui_block_xin_mask = 0xE71;
 		sde_cfg->has_3d_merge_reset = true;
+	} else if (IS_SDMTRINKET_TARGET(hw_rev)) {
+		sde_cfg->has_cwb_support = true;
+		sde_cfg->has_qsync = true;
+		sde_cfg->perf.min_prefill_lines = 24;
+		sde_cfg->vbif_qos_nlvl = 8;
+		sde_cfg->ts_prefill_rev = 2;
+		sde_cfg->ctl_rev = SDE_CTL_CFG_VERSION_1_0_0;
+		sde_cfg->delay_prg_fetch_start = true;
+		sde_cfg->sui_ns_allowed = true;
+		sde_cfg->sui_misr_supported = true;
+		sde_cfg->sui_block_xin_mask = 0xC61;
 	} else {
 		SDE_ERROR("unsupported chipset id:%X\n", hw_rev);
 		sde_cfg->perf.min_prefill_lines = 0xffff;
@@ -3660,7 +3752,7 @@ static int _sde_hardware_post_caps(struct sde_mdss_cfg *sde_cfg,
 		return -EINVAL;
 
 	if (IS_SM8150_TARGET(hw_rev) || IS_SM6150_TARGET(hw_rev) ||
-			IS_SDMMAGPIE_TARGET(hw_rev)) {
+		IS_SDMMAGPIE_TARGET(hw_rev) || IS_SDMTRINKET_TARGET(hw_rev)) {
 		sde_cfg->sui_supported_blendstage =
 			sde_cfg->max_mixer_blendstages - SDE_STAGE_0;
 
@@ -3842,6 +3934,10 @@ struct sde_mdss_cfg *sde_hw_catalog_init(struct drm_device *dev, u32 hw_rev)
 		goto end;
 
 	rc = sde_parse_merge_3d_dt(np, sde_cfg);
+	if (rc)
+		goto end;
+
+	rc = sde_qdss_parse_dt(np, sde_cfg);
 	if (rc)
 		goto end;
 

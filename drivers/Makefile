@@ -188,6 +188,8 @@ obj-$(CONFIG_TEE)		+= tee/
 obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_SENSORS_SSC)	+= sensors/
 obj-$(CONFIG_ESOC)              += esoc/
-obj-y              += oneplus/
-obj-y  += param_read_write/
-obj-y 	+= oem_debug/
+# GNSS driver
+obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
+obj-y              		+= oneplus/
+obj-y  				+= param_read_write/
+obj-y 				+= oem_debug/

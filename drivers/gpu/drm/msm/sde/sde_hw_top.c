@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -148,25 +148,6 @@ static void sde_hw_setup_pp_split(struct sde_hw_mdp *mdp,
 		SDE_REG_WRITE(&mdp->hw, PPB1_CONFIG, 0x0);
 		SDE_REG_WRITE(&mdp->hw, PPB1_CNTL, 0x0);
 	}
-}
-
-static void sde_hw_setup_cdm_output(struct sde_hw_mdp *mdp,
-		struct cdm_output_cfg *cfg)
-{
-	struct sde_hw_blk_reg_map *c;
-	u32 out_ctl = 0;
-
-	if (!mdp || !cfg)
-		return;
-
-	c = &mdp->hw;
-
-	if (cfg->wb_en)
-		out_ctl |= BIT(24);
-	else if (cfg->intf_en)
-		out_ctl |= BIT(19);
-
-	SDE_REG_WRITE(c, MDP_OUT_CTL_0, out_ctl);
 }
 
 static bool sde_hw_setup_clk_force_ctrl(struct sde_hw_mdp *mdp,
@@ -398,6 +379,8 @@ void sde_hw_reset_ubwc(struct sde_hw_mdp *mdp, struct sde_mdss_cfg *m)
 
 		if (IS_UBWC_30_SUPPORTED(m->ubwc_version))
 			reg |= BIT(10);
+		if (IS_UBWC_10_SUPPORTED(m->ubwc_version))
+			reg |= BIT(8);
 
 		SDE_REG_WRITE(&c, UBWC_STATIC, reg);
 	} else {
@@ -417,6 +400,18 @@ static void sde_hw_intf_audio_select(struct sde_hw_mdp *mdp)
 	SDE_REG_WRITE(c, HDMI_DP_CORE_SELECT, 0x1);
 }
 
+static void sde_hw_mdp_events(struct sde_hw_mdp *mdp, bool enable)
+{
+	struct sde_hw_blk_reg_map *c;
+
+	if (!mdp)
+		return;
+
+	c = &mdp->hw;
+
+	SDE_REG_WRITE(c, HW_EVENTS_CTL, enable);
+}
+
 static void sde_hw_program_cwb_ppb_ctrl(struct sde_hw_mdp *mdp,
 		bool dual, bool dspp_out)
 {
@@ -434,7 +429,6 @@ static void _setup_mdp_ops(struct sde_hw_mdp_ops *ops,
 {
 	ops->setup_split_pipe = sde_hw_setup_split_pipe;
 	ops->setup_pp_split = sde_hw_setup_pp_split;
-	ops->setup_cdm_output = sde_hw_setup_cdm_output;
 	ops->setup_clk_force_ctrl = sde_hw_setup_clk_force_ctrl;
 	ops->get_danger_status = sde_hw_get_danger_status;
 	ops->setup_vsync_source = sde_hw_setup_vsync_source;
@@ -444,6 +438,7 @@ static void _setup_mdp_ops(struct sde_hw_mdp_ops *ops,
 	ops->setup_dce = sde_hw_setup_dce;
 	ops->reset_ubwc = sde_hw_reset_ubwc;
 	ops->intf_audio_select = sde_hw_intf_audio_select;
+	ops->set_mdp_hw_events = sde_hw_mdp_events;
 	if (cap & BIT(SDE_MDP_VSYNC_SEL))
 		ops->setup_vsync_source = sde_hw_setup_vsync_source;
 	else

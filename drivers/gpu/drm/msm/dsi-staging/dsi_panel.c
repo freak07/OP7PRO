@@ -18,6 +18,7 @@
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
 #include <video/mipi_display.h>
+
 #include "dsi_panel.h"
 #include "dsi_ctrl_hw.h"
 #include "dsi_parser.h"
@@ -51,6 +52,7 @@
 #define DEFAULT_PANEL_JITTER_ARRAY_SIZE		2
 #define MAX_PANEL_JITTER		10
 #define DEFAULT_PANEL_PREFILL_LINES	25
+#define TICKS_IN_MICRO_SECOND		1000000
 extern int tp_1v8_power;
 
 enum dsi_dsc_ratio_type {
@@ -565,7 +567,7 @@ static int dsi_panel_set_pinctrl_state(struct dsi_panel *panel, bool enable)
 	int rc = 0;
 	struct pinctrl_state *state;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	if (enable)
@@ -702,7 +704,7 @@ static int dsi_panel_pinctrl_deinit(struct dsi_panel *panel)
 {
 	int rc = 0;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	devm_pinctrl_put(panel->pinctrl.pinctrl);
@@ -714,7 +716,7 @@ static int dsi_panel_pinctrl_init(struct dsi_panel *panel)
 {
 	int rc = 0;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	/* TODO:  pinctrl is defined in dsi dt node */
@@ -976,7 +978,7 @@ static int dsi_panel_bl_register(struct dsi_panel *panel)
 	int rc = 0;
 	struct dsi_backlight_config *bl = &panel->bl_config;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	switch (bl->type) {
@@ -1002,7 +1004,7 @@ static int dsi_panel_bl_unregister(struct dsi_panel *panel)
 	int rc = 0;
 	struct dsi_backlight_config *bl = &panel->bl_config;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	switch (bl->type) {
@@ -1046,13 +1048,13 @@ static int dsi_panel_parse_timing(struct dsi_mode_info *mode,
 	display_mode->priv_info->clk_rate_hz = mode->clk_rate_hz;
 
 	rc = utils->read_u32(utils->data, "qcom,mdss-mdp-transfer-time-us",
-				&mode->mdp_transfer_time_us);
-	if (!rc)
-		display_mode->priv_info->mdp_transfer_time_us =
-			mode->mdp_transfer_time_us;
-	else
-		display_mode->priv_info->mdp_transfer_time_us =
-			DEFAULT_MDP_TRANSFER_TIME;
+			&mode->mdp_transfer_time_us);
+	if (rc) {
+		pr_debug("fallback to default mdp-transfer-time-us\n");
+		mode->mdp_transfer_time_us = DEFAULT_MDP_TRANSFER_TIME;
+	}
+	display_mode->priv_info->mdp_transfer_time_us =
+					mode->mdp_transfer_time_us;
 
 	rc = utils->read_u32(utils->data,
 				"qcom,mdss-dsi-panel-framerate",
@@ -1328,6 +1330,51 @@ static int dsi_panel_parse_triggers(struct dsi_host_common_cfg *host,
 	return rc;
 }
 
+static int dsi_panel_parse_ext_bridge_config(struct dsi_host_common_cfg *host,
+					    struct dsi_parser_utils *utils,
+					    const char *name)
+{
+	u32 len = 0, i = 0;
+	int rc = 0;
+
+	host->ext_bridge_num = 0;
+
+	len = utils->count_u32_elems(utils->data, "qcom,mdss-dsi-ext-bridge");
+
+	if (len > MAX_DSI_CTRLS_PER_DISPLAY) {
+		pr_debug("[%s] Invalid ext bridge count set\n", name);
+		return -EINVAL;
+	}
+
+	if (len == 0) {
+		pr_debug("[%s] It's a DSI panel, not bridge\n", name);
+		return rc;
+	}
+
+	rc = utils->read_u32_array(utils->data, "qcom,mdss-dsi-ext-bridge",
+			host->ext_bridge_map,
+			len);
+
+	if (rc) {
+		pr_debug("[%s] Did not get ext bridge set\n", name);
+		return rc;
+	}
+
+	for (i = 0; i < len; i++) {
+		if (host->ext_bridge_map[i] >= MAX_EXT_BRIDGE_PORT_CONFIG) {
+			pr_debug("[%s] Invalid bridge port value %d\n",
+				name, host->ext_bridge_map[i]);
+			return -EINVAL;
+		}
+	}
+
+	host->ext_bridge_num = len;
+
+	pr_debug("[%s] ext bridge count is %d\n", name, host->ext_bridge_num);
+
+	return rc;
+}
+
 static int dsi_panel_parse_misc_host_config(struct dsi_host_common_cfg *host,
 					    struct dsi_parser_utils *utils,
 					    const char *name)
@@ -1353,9 +1400,6 @@ static int dsi_panel_parse_misc_host_config(struct dsi_host_common_cfg *host,
 
 	host->append_tx_eot = utils->read_bool(utils->data,
 						"qcom,mdss-dsi-tx-eot-append");
-
-	host->ext_bridge_mode = utils->read_bool(utils->data,
-					"qcom,mdss-dsi-ext-bridge-mode");
 
 	host->force_hs_clk_lane = utils->read_bool(utils->data,
 					"qcom,mdss-dsi-force-clock-lane-hs");
@@ -1443,6 +1487,13 @@ static int dsi_panel_parse_host_config(struct dsi_panel *panel)
 		pr_err("[%s] failed to parse misc host config, rc=%d\n",
 		       panel->name, rc);
 		goto error;
+	}
+
+	dsi_panel_parse_ext_bridge_config(&panel->host_config, utils,
+					      panel->name);
+	if (rc) {
+		pr_err("[%s] failed to parse ext bridge config, rc=%d\n",
+		       panel->name, rc);
 	}
 
 	dsi_panel_parse_split_link_config(&panel->host_config, utils,
@@ -2107,6 +2158,7 @@ static int dsi_panel_parse_cmd_sets_sub(struct dsi_panel_cmd_set *cmd,
 	const char *data;
 	const char *state;
 	u32 packet_count = 0;
+
 	data = utils->get_property(utils->data, cmd_set_prop_map[type],
 			&length);
 	if (!data) {
@@ -2152,6 +2204,7 @@ static int dsi_panel_parse_cmd_sets_sub(struct dsi_panel_cmd_set *cmd,
 		       cmd_set_state_map[type], state);
 		goto error_free_mem;
 	}
+
 	return rc;
 error_free_mem:
 	kfree(cmd->cmds);
@@ -2208,7 +2261,7 @@ static int dsi_panel_parse_reset_sequence(struct dsi_panel *panel)
 	struct dsi_parser_utils *utils = &panel->utils;
 	struct dsi_reset_seq *seq;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	arr = utils->get_property(utils->data,
@@ -2344,7 +2397,7 @@ static int dsi_panel_parse_power_cfg(struct dsi_panel *panel)
 	int rc = 0;
 	char *supply_name;
 
-	if (panel->host_config.ext_bridge_mode)
+	if (panel->host_config.ext_bridge_num)
 		return 0;
 
 	if (!strcmp(panel->type, "primary"))
@@ -2381,7 +2434,7 @@ static int dsi_panel_parse_gpios(struct dsi_panel *panel)
 	panel->reset_config.reset_gpio = utils->get_named_gpio(utils->data,
 					      reset_gpio_name, 0);
 	if (!gpio_is_valid(panel->reset_config.reset_gpio) &&
-		!panel->host_config.ext_bridge_mode) {
+		!panel->host_config.ext_bridge_num) {
 		rc = panel->reset_config.reset_gpio;
 		pr_err("[%s] failed get reset gpio, rc=%d\n", panel->name, rc);
 		goto error;
@@ -2463,18 +2516,6 @@ static int dsi_panel_parse_bl_pwm_config(struct dsi_panel *panel)
 		goto error;
 	}
 	config->pwm_period_usecs = val;
-
-	config->pwm_pmi_control = utils->read_bool(utils->data,
-						"qcom,mdss-dsi-bl-pwm-pmi");
-
-	config->pwm_gpio = utils->get_named_gpio(utils->data,
-					     "qcom,mdss-dsi-pwm-gpio",
-					     0);
-	if (!gpio_is_valid(config->pwm_gpio)) {
-		pr_err("pwm gpio is invalid\n");
-		rc = -EINVAL;
-		goto error;
-	}
 
 error:
 	return rc;
@@ -2561,6 +2602,16 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 		panel->bl_config.brightness_max_level = 255;
 	} else {
 		panel->bl_config.brightness_max_level = val;
+	}
+
+	rc = utils->read_u32(utils->data,
+			"qcom,mdss-dsi-bl-default-level", &val);
+	if (rc) {
+		panel->bl_config.brightness_default_level =
+			panel->bl_config.brightness_max_level;
+		pr_debug("set default brightness to max level\n");
+	} else {
+		panel->bl_config.brightness_default_level = val;
 	}
 
 	if (panel->bl_config.type == DSI_BACKLIGHT_PWM) {
@@ -2774,12 +2825,18 @@ int dsi_dsc_populate_static_param(struct msm_display_dsc_info *dsc)
 
 
 static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
-				struct dsi_parser_utils *utils)
+		struct dsi_parser_utils *utils, enum dsi_op_mode panel_mode)
 {
 	const char *data;
 	u32 len, i;
 	int rc = 0;
 	struct dsi_display_mode_priv_info *priv_info;
+	u64 h_period, v_period;
+	u32 refresh_rate = TICKS_IN_MICRO_SECOND;
+	struct dsi_mode_info *timing = NULL;
+
+	if (!mode || !mode->priv_info)
+		return -EINVAL;
 
 	priv_info = mode->priv_info;
 
@@ -2799,9 +2856,20 @@ static int dsi_panel_parse_phy_timing(struct dsi_display_mode *mode,
 		priv_info->phy_timing_len = len;
 	};
 
-	mode->pixel_clk_khz = (DSI_H_TOTAL_DSC(&mode->timing) *
-			DSI_V_TOTAL(&mode->timing) *
-			mode->timing.refresh_rate) / 1000;
+	timing = &mode->timing;
+
+	if (panel_mode == DSI_OP_CMD_MODE) {
+		h_period = DSI_H_ACTIVE_DSC(timing);
+		v_period = timing->v_active;
+		do_div(refresh_rate, priv_info->mdp_transfer_time_us);
+	} else {
+		h_period = DSI_H_TOTAL_DSC(timing);
+		v_period = DSI_V_TOTAL(timing);
+		refresh_rate = timing->refresh_rate;
+	}
+
+	mode->pixel_clk_khz = (h_period * v_period * refresh_rate) / 1000;
+
 	return rc;
 }
 
@@ -3543,6 +3611,7 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 {
 	struct dsi_panel *panel;
 	struct dsi_parser_utils *utils;
+	const char *panel_physical_type;
 	int rc = 0;
 
 	panel = kzalloc(sizeof(*panel), GFP_KERNEL);
@@ -3568,6 +3637,15 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	}
 	else if (!panel->name)
 		panel->name = DSI_PANEL_DEFAULT_LABEL;
+
+	/*
+	 * Set panel type to LCD as default.
+	 */
+	panel->panel_type = DSI_DISPLAY_PANEL_TYPE_LCD;
+	panel_physical_type  = utils->get_property(utils->data,
+				"qcom,mdss-dsi-panel-physical-type", NULL);
+	if (panel_physical_type && !strcmp(panel_physical_type, "oled"))
+		panel->panel_type = DSI_DISPLAY_PANEL_TYPE_OLED;
 
 	rc = dsi_panel_parse_host_config(panel);
 	if (rc) {
@@ -3620,8 +3698,11 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 		pr_err("failed to parse power config, rc=%d\n", rc);
 
 	rc = dsi_panel_parse_bl_config(panel);
-	if (rc)
+	if (rc) {
 		pr_err("failed to parse backlight config, rc=%d\n", rc);
+		if (rc == -EPROBE_DEFER)
+			goto error;
+	}
 
 
 	rc = dsi_panel_parse_misc_features(panel);
@@ -3649,6 +3730,7 @@ struct dsi_panel *dsi_panel_get(struct device *parent,
 	if (rc)
 		pr_debug("failed to parse esd config, rc=%d\n", rc);
 
+	panel->power_mode = SDE_MODE_DPMS_OFF;
 	drm_panel_init(&panel->drm_panel);
 	mutex_init(&panel->panel_lock);
 
@@ -3793,14 +3875,14 @@ int dsi_panel_get_mode_count(struct dsi_panel *panel)
 
 	timings_np = utils->get_child_by_name(utils->data,
 			"qcom,mdss-dsi-display-timings");
-	if (!timings_np && !panel->host_config.ext_bridge_mode) {
+	if (!timings_np && !panel->host_config.ext_bridge_num) {
 		pr_err("no display timing nodes defined\n");
 		rc = -EINVAL;
 		goto error;
 	}
 
 	count = utils->get_child_count(timings_np);
-	if ((!count && !panel->host_config.ext_bridge_mode) ||
+	if ((!count && !panel->host_config.ext_bridge_num) ||
 		count > DSI_MODE_MAX) {
 		pr_err("invalid count of timing nodes: %d\n", count);
 		rc = -EINVAL;
@@ -3809,7 +3891,7 @@ int dsi_panel_get_mode_count(struct dsi_panel *panel)
 
 	/* No multiresolution support is available for video mode panels */
 	if (panel->panel_mode != DSI_OP_CMD_MODE &&
-		!panel->host_config.ext_bridge_mode)
+		!panel->host_config.ext_bridge_num)
 		count = SINGLE_MODE_SUPPORT;
 
 	panel->num_timing_nodes = count;
@@ -3918,6 +4000,9 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 			goto parse_fail;
 		}
 
+		if (panel->panel_mode == DSI_OP_VIDEO_MODE)
+			mode->priv_info->mdp_transfer_time_us = 0;
+
 		rc = dsi_panel_parse_dsc_params(mode, utils);
 		if (rc) {
 			pr_err("failed to parse dsc params, rc=%d\n", rc);
@@ -3942,7 +4027,7 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 			pr_err(
 			"failed to parse panel jitter config, rc=%d\n", rc);
 
-		rc = dsi_panel_parse_phy_timing(mode, utils);
+		rc = dsi_panel_parse_phy_timing(mode, utils, panel->panel_mode);
 		if (rc) {
 			pr_err(
 			"failed to parse panel phy timings, rc=%d\n", rc);
@@ -4108,13 +4193,29 @@ int dsi_panel_set_lp1(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
+	/**
+	 * Consider LP1->LP2->LP1.
+	 * If the panel is already in LP mode, do not need to
+	 * set the regulator.
+	 * IBB and AB power mode woulc be set at the same time
+	 * in PMIC driver, so we only call ibb setting, that
+	 * is enough.
+	 */
+	if (dsi_panel_is_type_oled(panel) &&
+	    panel->power_mode != SDE_MODE_DPMS_LP2)
+		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
+			"ibb", REGULATOR_MODE_IDLE);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP1);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP1 cmd, rc=%d\n",
 		       panel->name, rc);
-	
+
 	panel->need_power_on_backlight = true;
 
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4129,10 +4230,14 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP2);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
 		       panel->name, rc);
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4147,10 +4252,22 @@ int dsi_panel_set_nolp(struct dsi_panel *panel)
 	}
 
 	mutex_lock(&panel->panel_lock);
+	if (!panel->panel_initialized)
+		goto exit;
+
+	/**
+	 * Consider about LP1->LP2->NOLP.
+	 */
+	if (dsi_panel_is_type_oled(panel) &&
+	    (panel->power_mode == SDE_MODE_DPMS_LP1 ||
+		panel->power_mode == SDE_MODE_DPMS_LP2))
+		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
+			"ibb", REGULATOR_MODE_NORMAL);
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_NOLP);
 	if (rc)
 		pr_err("[%s] failed to send DSI_CMD_SET_NOLP cmd, rc=%d\n",
 		       panel->name, rc);
+exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;
 }
@@ -4343,6 +4460,7 @@ int dsi_panel_send_roi_dcs(struct dsi_panel *panel, int ctrl_idx,
 	mutex_unlock(&panel->panel_lock);
 
 	dsi_panel_destroy_cmd_packets(set);
+	dsi_panel_dealloc_cmd_packets(set);
 
 	return rc;
 }
@@ -4538,8 +4656,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 		pr_err("invalid params\n");
 		return -EINVAL;
 	}
-	pr_err("dsi_panel_disable aod_mode =%d\n",panel->aod_mode);
-	printk(KERN_ERR"dsi_panel_disable ++\n");
+
 	mutex_lock(&panel->panel_lock);
 
 	/* Avoid sending panel off commands when ESD recovery is underway */
@@ -4551,6 +4668,16 @@ int dsi_panel_disable(struct dsi_panel *panel)
 	if(panel->aod_mode==0){
 		panel->aod_status=0;
 		}
+
+		/*
+		 * Need to set IBB/AB regulator mode to STANDBY,
+		 * if panel is going off from AOD mode.
+		 */
+		if (dsi_panel_is_type_oled(panel) &&
+		      (panel->power_mode == SDE_MODE_DPMS_LP1 ||
+		       panel->power_mode == SDE_MODE_DPMS_LP2))
+			dsi_pwr_panel_regulator_mode_set(&panel->power_info,
+				"ibb", REGULATOR_MODE_STANDBY);
 
 		rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_OFF);
 		if (rc) {
@@ -4566,6 +4693,7 @@ int dsi_panel_disable(struct dsi_panel *panel)
 		}
 	}
 	panel->panel_initialized = false;
+	panel->power_mode = SDE_MODE_DPMS_OFF;
 
 	mutex_unlock(&panel->panel_lock);
 

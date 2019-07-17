@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -55,6 +55,7 @@
 #define SDE_HW_VER_510	SDE_HW_VER(5, 1, 0) /* sdmshrike v1.0 */
 #define SDE_HW_VER_520	SDE_HW_VER(5, 2, 0) /* sdmmagpie v1.0 */
 #define SDE_HW_VER_530	SDE_HW_VER(5, 3, 0) /* sm6150 v1.0 */
+#define SDE_HW_VER_540	SDE_HW_VER(5, 4, 0) /* sdmtrinket v1.0 */
 
 #define IS_MSM8996_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_170)
 #define IS_MSM8998_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_300)
@@ -64,6 +65,7 @@
 #define IS_SDMSHRIKE_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_510)
 #define IS_SDMMAGPIE_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_520)
 #define IS_SM6150_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_530)
+#define IS_SDMTRINKET_TARGET(rev) IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_VER_540)
 
 #define SDE_HW_BLK_NAME_LEN	16
 
@@ -101,7 +103,8 @@ enum {
 	SDE_HW_UBWC_VER_20 = SDE_HW_UBWC_VER(0x200),
 	SDE_HW_UBWC_VER_30 = SDE_HW_UBWC_VER(0x300),
 };
-
+#define IS_UBWC_10_SUPPORTED(rev) \
+		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_10)
 #define IS_UBWC_20_SUPPORTED(rev) \
 		IS_SDE_MAJOR_MINOR_SAME((rev), SDE_HW_UBWC_VER_20)
 #define IS_UBWC_30_SUPPORTED(rev) \
@@ -162,6 +165,7 @@ enum {
  * @SDE_SSPP_BLOCK_SEC_UI    Blocks secure-ui layers
  * @SDE_SSPP_QOS_FL_NOCALC   Avoid fill level calculation for QoS/danger/safe
  * @SDE_SSPP_SCALER_QSEED3LITE Qseed3lite algorithm support
+ * @SDE_SSPP_LINE_INSERTION  Line insertion support
  * @SDE_SSPP_MAX             maximum value
  */
 enum {
@@ -196,6 +200,7 @@ enum {
 	SDE_SSPP_BLOCK_SEC_UI,
 	SDE_SSPP_QOS_FL_NOCALC,
 	SDE_SSPP_SCALER_QSEED3LITE,
+	SDE_SSPP_LINE_INSERTION,
 	SDE_SSPP_MAX
 };
 
@@ -832,6 +837,17 @@ struct sde_merge_3d_cfg {
 };
 
 /**
+ * struct sde_qdss_cfg - information of qdss blocks
+ * @id                 enum identifying this block
+ * @base               register offset of this block
+ * @len:               length of hardware block
+ * @features           bit mask identifying sub-blocks/features
+ */
+struct sde_qdss_cfg {
+	SDE_HW_BLK_INFO;
+};
+
+/**
  * struct sde_rot_vbif_cfg - inline rotator vbif configs
  * @xin_id             xin client id
  * @num                enum identifying this block
@@ -989,6 +1005,8 @@ struct sde_perf_cdp_cfg {
  * @cdp_cfg            cdp use case configurations
  * @cpu_mask:          pm_qos cpu mask value
  * @cpu_dma_latency:   pm_qos cpu dma latency value
+ * @axi_bus_width:     axi bus width value in bytes
+ * @num_mnoc_ports:    number of mnoc ports
  */
 struct sde_perf_cfg {
 	u32 max_bw_low;
@@ -1015,6 +1033,8 @@ struct sde_perf_cfg {
 	struct sde_perf_cdp_cfg cdp_cfg[SDE_PERF_CDP_USAGE_MAX];
 	u32 cpu_mask;
 	u32 cpu_dma_latency;
+	u32 axi_bus_width;
+	u32 num_mnoc_ports;
 };
 
 /**
@@ -1106,6 +1126,7 @@ struct sde_mdss_cfg {
 	bool delay_prg_fetch_start;
 	bool has_qsync;
 	bool has_3d_merge_reset;
+	bool has_line_insertion;
 
 	bool sui_misr_supported;
 	u32 sui_block_xin_mask;
@@ -1168,6 +1189,9 @@ struct sde_mdss_cfg {
 	u32 merge_3d_count;
 	struct sde_merge_3d_cfg merge_3d[MAX_BLOCKS];
 
+	u32 qdss_count;
+	struct sde_qdss_cfg qdss[MAX_BLOCKS];
+
 	/* Add additional block data structures here */
 
 	struct sde_perf_cfg perf;
@@ -1229,7 +1253,7 @@ static inline bool sde_hw_sspp_multirect_enabled(const struct sde_sspp_cfg *cfg)
 			 test_bit(SDE_SSPP_SMART_DMA_V2p5, &cfg->features);
 }
 
-static inline sde_hw_intf_te_supported(const struct sde_mdss_cfg *sde_cfg)
+static inline bool sde_hw_intf_te_supported(const struct sde_mdss_cfg *sde_cfg)
 {
 	return test_bit(SDE_INTF_TE, &(sde_cfg->intf[0].features));
 }

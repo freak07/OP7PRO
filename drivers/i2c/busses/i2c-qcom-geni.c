@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,6 +28,7 @@
 #include <linux/ipc_logging.h>
 #include <linux/dmaengine.h>
 #include <linux/msm_gpi.h>
+#include <soc/qcom/boot_stats.h>
 
 #include <linux/gpio.h>
 #define AP_BAT_SCL 89
@@ -126,6 +127,7 @@ struct geni_i2c_dev {
 	struct msm_gpi_dma_async_tx_cb_param rx_cb;
 	enum i2c_se_mode se_mode;
 	int reset_support;
+	bool cmd_done;
 };
 
 struct geni_i2c_err_log {
@@ -251,6 +253,7 @@ static irqreturn_t geni_i2c_irq(int irq, void *dev)
 
 	if (!cur || (m_stat & M_CMD_FAILURE_EN) ||
 		    (dm_rx_st & (DM_I2C_CB_ERR)) ||
+		    (m_stat & M_CMD_CANCEL_EN) ||
 		    (m_stat & M_CMD_ABORT_EN)) {
 
 		if (m_stat & M_GP_IRQ_1_EN)
@@ -271,6 +274,7 @@ static irqreturn_t geni_i2c_irq(int irq, void *dev)
 		if (!dma)
 			writel_relaxed(0, (gi2c->base +
 					   SE_GENI_TX_WATERMARK_REG));
+		gi2c->cmd_done = true;
 		goto irqret;
 	}
 
@@ -327,17 +331,24 @@ irqret:
 		if (dm_tx_st)
 			writel_relaxed(dm_tx_st, gi2c->base +
 				       SE_DMA_TX_IRQ_CLR);
+
 		if (dm_rx_st)
 			writel_relaxed(dm_rx_st, gi2c->base +
 				       SE_DMA_RX_IRQ_CLR);
 		/* Ensure all writes are done before returning from ISR. */
 		wmb();
+
+		if ((dm_tx_st & TX_DMA_DONE) || (dm_rx_st & RX_DMA_DONE))
+			gi2c->cmd_done = true;
 	}
-	/* if this is err with done-bit not set, handle that thr' timeout. */
-	if (m_stat & M_CMD_DONE_EN)
+
+	else if (m_stat & M_CMD_DONE_EN)
+		gi2c->cmd_done = true;
+
+	if (gi2c->cmd_done) {
+		gi2c->cmd_done = false;
 		complete(&gi2c->xfer);
-	else if ((dm_tx_st & TX_DMA_DONE) || (dm_rx_st & RX_DMA_DONE))
-		complete(&gi2c->xfer);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -676,6 +687,7 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		dma_addr_t tx_dma = 0;
 		dma_addr_t rx_dma = 0;
 		enum se_xfer_mode mode = FIFO_MODE;
+		reinit_completion(&gi2c->xfer);
 
 		m_param |= (stretch ? STOP_STRETCH : 0);
 		m_param |= ((msgs[i].addr & 0x7F) << SLV_ADDR_SHFT);
@@ -733,16 +745,23 @@ static int geni_i2c_xfer(struct i2c_adapter *adap,
 		mb();
 		timeout = wait_for_completion_timeout(&gi2c->xfer,
 						gi2c->xfer_timeout);
-		if (!timeout) {
+		if (!timeout)
 			geni_i2c_err(gi2c, GENI_TIMEOUT);
+
+		if (gi2c->err) {
+			reinit_completion(&gi2c->xfer);
 			gi2c->cur = NULL;
-			geni_abort_m_cmd(gi2c->base);
+			geni_cancel_m_cmd(gi2c->base);
 			timeout = wait_for_completion_timeout(&gi2c->xfer, HZ);
+			if (!timeout)
+				geni_abort_m_cmd(gi2c->base);
 		}
+
 		gi2c->cur_wr = 0;
 		gi2c->cur_rd = 0;
 		if (mode == SE_DMA) {
 			if (gi2c->err) {
+				reinit_completion(&gi2c->xfer);
 				if (msgs[i].flags != I2C_M_RD)
 					writel_relaxed(1, gi2c->base +
 							SE_DMA_TX_FSM_RST);
@@ -811,12 +830,16 @@ static int geni_i2c_probe(struct platform_device *pdev)
 	struct platform_device *wrapper_pdev;
 	struct device_node *wrapper_ph_node;
 	int ret;
+	char boot_marker[40];
 
 	gi2c = devm_kzalloc(&pdev->dev, sizeof(*gi2c), GFP_KERNEL);
 	if (!gi2c)
 		return -ENOMEM;
 
 	gi2c->dev = &pdev->dev;
+	snprintf(boot_marker, sizeof(boot_marker),
+				"M - DRIVER GENI_I2C Init");
+	place_marker(boot_marker);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res)
@@ -967,6 +990,9 @@ static int geni_i2c_probe(struct platform_device *pdev)
 	pm_runtime_enable(gi2c->dev);
 	i2c_add_adapter(&gi2c->adap);
 
+	snprintf(boot_marker, sizeof(boot_marker),
+				"M - DRIVER GENI_I2C_%d Ready", gi2c->adap.nr);
+	place_marker(boot_marker);
 	dev_dbg(gi2c->dev, "I2C probed\n");
 	return 0;
 }
@@ -984,6 +1010,16 @@ static int geni_i2c_remove(struct platform_device *pdev)
 
 static int geni_i2c_resume_noirq(struct device *device)
 {
+	return 0;
+}
+
+static int geni_i2c_hib_resume_noirq(struct device *device)
+{
+	struct geni_i2c_dev *gi2c = dev_get_drvdata(device);
+
+	GENI_SE_DBG(gi2c->ipcl, false, gi2c->dev,
+				    "%s\n", __func__);
+	gi2c->se_mode = UNINITIALIZED;
 	return 0;
 }
 
@@ -1101,6 +1137,8 @@ static const struct dev_pm_ops geni_i2c_pm_ops = {
 	.resume_noirq		= geni_i2c_resume_noirq,
 	.runtime_suspend	= geni_i2c_runtime_suspend,
 	.runtime_resume		= geni_i2c_runtime_resume,
+	.freeze			= geni_i2c_suspend_noirq,
+	.restore		= geni_i2c_hib_resume_noirq,
 };
 
 static const struct of_device_id geni_i2c_dt_match[] = {

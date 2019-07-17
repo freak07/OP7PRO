@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -78,6 +78,7 @@ int cam_ipe_init_hw(void *device_priv,
 	cpas_vote.ahb_vote.type = CAM_VOTE_ABSOLUTE;
 	cpas_vote.ahb_vote.vote.level = CAM_SVS_VOTE;
 	cpas_vote.axi_vote.compressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
+	cpas_vote.axi_vote.compressed_bw_ab = CAM_CPAS_DEFAULT_AXI_BW;
 	cpas_vote.axi_vote.uncompressed_bw = CAM_CPAS_DEFAULT_AXI_BW;
 
 	rc = cam_cpas_start(core_info->cpas_handle,
@@ -223,6 +224,12 @@ static int cam_ipe_cmd_reset(struct cam_hw_soc_info *soc_info,
 	bool reset_ipe_top_fail = false;
 
 	CAM_DBG(CAM_ICP, "CAM_ICP_IPE_CMD_RESET");
+	if (!core_info->clk_enable || !core_info->cpas_start) {
+		CAM_ERR(CAM_HFI, "IPE reset failed. clk_en %d cpas_start %d",
+				core_info->clk_enable, core_info->cpas_start);
+		return -EINVAL;
+	}
+
 	/* IPE CDM core reset*/
 	cam_io_w_mb((uint32_t)0xF,
 		soc_info->reg_map[0].mem_base + IPE_CDM_RST_CMD);

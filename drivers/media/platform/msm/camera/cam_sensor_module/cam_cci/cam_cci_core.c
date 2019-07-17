@@ -1146,7 +1146,7 @@ static int32_t cam_cci_burst_read(struct v4l2_subdev *sd,
 		    * RD_DONE exclusively.
 		    */
 			rem_jiffies = wait_for_completion_timeout(
-			&cci_dev->cci_master_info[master].reset_complete,
+			&cci_dev->cci_master_info[master].rd_done,
 			CCI_TIMEOUT);
 			if (!rem_jiffies) {
 				rc = -ETIMEDOUT;
@@ -1327,10 +1327,11 @@ static int32_t cam_cci_read(struct v4l2_subdev *sd,
 	val = 1 << ((master * 2) + queue);
 	cam_io_w_mb(val, base + CCI_QUEUE_START_ADDR);
 	CAM_DBG(CAM_CCI,
-		"waiting_for_rd_done [exp_words: %d]", exp_words);
+		"waiting_for_rd_done [exp_words: %d]",
+		((read_cfg->num_byte / 4) + 1));
 
 	rc = wait_for_completion_timeout(
-		&cci_dev->cci_master_info[master].reset_complete, CCI_TIMEOUT);
+		&cci_dev->cci_master_info[master].rd_done, CCI_TIMEOUT);
 	if (rc <= 0) {
 #ifdef DUMP_CCI_REGISTERS
 		cam_cci_dump_registers(cci_dev, master, queue);
