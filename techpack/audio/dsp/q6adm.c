@@ -132,6 +132,8 @@ static struct adm_multi_ch_map multi_ch_maps[2] = {
 			}
 };
 
+static struct adm_multi_ch_map port_channel_map[AFE_MAX_PORTS];
+
 static int adm_get_parameters[MAX_COPPS_PER_PORT * ADM_GET_PARAMETER_LENGTH];
 static int adm_module_topo_list[MAX_COPPS_PER_PORT *
 				ADM_GET_TOPO_MODULE_INSTANCE_LIST_LENGTH];
@@ -1349,6 +1351,31 @@ int adm_get_multi_ch_map(char *channel_map, int path)
 }
 EXPORT_SYMBOL(adm_get_multi_ch_map);
 
+/**
+ * adm_set_port_multi_ch_map -
+ *        Update port specific channel map info
+ *
+ * @channel_map: pointer with channel map info
+ * @port_id: port for which chmap is set
+ */
+void adm_set_port_multi_ch_map(char *channel_map, int port_id)
+{
+	int port_idx;
+
+	port_id = q6audio_convert_virtual_to_portid(port_id);
+	port_idx = adm_validate_and_get_port_index(port_id);
+
+	if (port_idx < 0) {
+		pr_err("%s: Invalid port_id 0x%x\n", __func__, port_id);
+		return;
+	}
+
+	memcpy(port_channel_map[port_idx].channel_mapping, channel_map,
+			PCM_FORMAT_MAX_NUM_CHANNEL_V8);
+	port_channel_map[port_idx].set_channel_map = true;
+}
+EXPORT_SYMBOL(adm_set_port_multi_ch_map);
+
 static int adm_process_get_param_response(u32 opcode, u32 idx, u32 *payload,
 					  u32 payload_size)
 {
@@ -1366,12 +1393,22 @@ static int adm_process_get_param_response(u32 opcode, u32 idx, u32 *payload,
 	switch (opcode) {
 	case ADM_CMDRSP_GET_PP_PARAMS_V5:
 		struct_size = sizeof(struct adm_cmd_rsp_get_pp_params_v5);
+		if (payload_size < struct_size) {
+			pr_err("%s: payload size %d < expected size %d\n",
+				__func__, payload_size, struct_size);
+			break;
+		}
 		v5_rsp = (struct adm_cmd_rsp_get_pp_params_v5 *) payload;
 		data_size = v5_rsp->param_hdr.param_size;
 		param_data = v5_rsp->param_data;
 		break;
 	case ADM_CMDRSP_GET_PP_PARAMS_V6:
 		struct_size = sizeof(struct adm_cmd_rsp_get_pp_params_v6);
+		if (payload_size < struct_size) {
+			pr_err("%s: payload size %d < expected size %d\n",
+				__func__, payload_size, struct_size);
+			break;
+		}
 		v6_rsp = (struct adm_cmd_rsp_get_pp_params_v6 *) payload;
 		data_size = v6_rsp->param_hdr.param_size;
 		param_data = v6_rsp->param_data;
@@ -1545,7 +1582,7 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 	}
 
 	adm_callback_debug_print(data);
-	if (data->payload_size) {
+	if (data->payload_size >= sizeof(uint32_t)) {
 		copp_idx = (data->token) & 0XFF;
 		port_idx = ((data->token) >> 16) & 0xFF;
 		client_id = ((data->token) >> 8) & 0xFF;
@@ -1567,6 +1604,18 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 		if (data->opcode == APR_BASIC_RSP_RESULT) {
 			pr_debug("%s: APR_BASIC_RSP_RESULT id 0x%x\n",
 				__func__, payload[0]);
+
+			if (!((client_id != ADM_CLIENT_ID_SOURCE_TRACKING) &&
+			     ((payload[0] == ADM_CMD_SET_PP_PARAMS_V5) ||
+			      (payload[0] == ADM_CMD_SET_PP_PARAMS_V6)))) {
+				if (data->payload_size <
+						(2 * sizeof(uint32_t))) {
+					pr_err("%s: Invalid payload size %d\n",
+						__func__, data->payload_size);
+					return 0;
+				}
+			}
+
 			if (payload[1] != 0) {
 				pr_err("%s: cmd = 0x%x returned error = 0x%x\n",
 					__func__, payload[0], payload[1]);
@@ -1691,9 +1740,14 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 		case ADM_CMDRSP_DEVICE_OPEN_V5:
 		case ADM_CMDRSP_DEVICE_OPEN_V6:
 		case ADM_CMDRSP_DEVICE_OPEN_V8: {
-			struct adm_cmd_rsp_device_open_v5 *open =
-			(struct adm_cmd_rsp_device_open_v5 *)data->payload;
-
+			struct adm_cmd_rsp_device_open_v5 *open = NULL;
+			if (data->payload_size <
+				sizeof(struct adm_cmd_rsp_device_open_v5)) {
+				pr_err("%s: Invalid payload size %d\n", __func__,
+					data->payload_size);
+				return 0;
+			}
+			open = (struct adm_cmd_rsp_device_open_v5 *)data->payload;
 			if (open->copp_id == INVALID_COPP_ID) {
 				pr_err("%s: invalid coppid rxed %d\n",
 					__func__, open->copp_id);
@@ -1743,21 +1797,28 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 		case ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST_V2:
 			pr_debug("%s: ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST\n",
 				 __func__);
-			num_modules = payload[1];
-			pr_debug("%s: Num modules %d\n", __func__, num_modules);
-			if (payload[0]) {
-				pr_err("%s: ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST, error = %d\n",
-				       __func__, payload[0]);
-			} else if (num_modules > MAX_MODULES_IN_TOPO) {
-				pr_err("%s: ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST invalid num modules received, num modules = %d\n",
-				       __func__, num_modules);
+			if (data->payload_size >= (2 * sizeof(uint32_t))) {
+				num_modules = payload[1];
+				pr_debug("%s: Num modules %d\n", __func__,
+					 num_modules);
+				if (payload[0]) {
+					pr_err("%s: ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST, error = %d\n",
+					       __func__, payload[0]);
+				} else if (num_modules > MAX_MODULES_IN_TOPO) {
+					pr_err("%s: ADM_CMDRSP_GET_PP_TOPO_MODULE_LIST invalid num modules received, num modules = %d\n",
+					       __func__, num_modules);
+				} else {
+					ret = adm_process_get_topo_list_response(
+						data->opcode, copp_idx,
+						num_modules, payload,
+						data->payload_size);
+					if (ret)
+						pr_err("%s: Failed to process get topo modules list response, error %d\n",
+						       __func__, ret);
+				}
 			} else {
-				ret = adm_process_get_topo_list_response(
-					data->opcode, copp_idx, num_modules,
-					payload, data->payload_size);
-				if (ret)
-					pr_err("%s: Failed to process get topo modules list response, error %d\n",
-					       __func__, ret);
+				pr_err("%s: Invalid payload size %d\n",
+					__func__, data->payload_size);
 			}
 			atomic_set(&this_adm.copp.stat[port_idx][copp_idx],
 				   payload[0]);
@@ -2391,7 +2452,7 @@ fail_cmd:
 EXPORT_SYMBOL(adm_connect_afe_port);
 
 int adm_arrange_mch_map(struct adm_cmd_device_open_v5 *open, int path,
-			 int channel_mode)
+			 int channel_mode, int port_idx)
 {
 	int rc = 0, idx;
 
@@ -2409,10 +2470,18 @@ int adm_arrange_mch_map(struct adm_cmd_device_open_v5 *open, int path,
 	default:
 		goto non_mch_path;
 	};
-	if ((open->dev_num_channel > 2) && multi_ch_maps[idx].set_channel_map) {
-		memcpy(open->dev_channel_mapping,
-			multi_ch_maps[idx].channel_mapping,
-			PCM_FORMAT_MAX_NUM_CHANNEL);
+
+	if ((open->dev_num_channel > 2) &&
+		(port_channel_map[port_idx].set_channel_map ||
+		 multi_ch_maps[idx].set_channel_map)) {
+		if (port_channel_map[port_idx].set_channel_map)
+			memcpy(open->dev_channel_mapping,
+				port_channel_map[port_idx].channel_mapping,
+				PCM_FORMAT_MAX_NUM_CHANNEL);
+		else
+			memcpy(open->dev_channel_mapping,
+				multi_ch_maps[idx].channel_mapping,
+				PCM_FORMAT_MAX_NUM_CHANNEL);
 	} else {
 		if (channel_mode == 1) {
 			open->dev_channel_mapping[0] = PCM_CHANNEL_FC;
@@ -2526,8 +2595,7 @@ int adm_arrange_mch_ep2_map(struct adm_cmd_device_open_v6 *open_v6,
 
 static int adm_arrange_mch_map_v8(
 		struct adm_device_endpoint_payload *ep_payload,
-		int path,
-		int channel_mode)
+		int path, int channel_mode, int port_idx)
 {
 	int rc = 0, idx;
 
@@ -2546,10 +2614,16 @@ static int adm_arrange_mch_map_v8(
 	};
 
 	if ((ep_payload->dev_num_channel > 2) &&
-			multi_ch_maps[idx].set_channel_map) {
-		memcpy(ep_payload->dev_channel_mapping,
-			multi_ch_maps[idx].channel_mapping,
-			PCM_FORMAT_MAX_NUM_CHANNEL_V8);
+		(port_channel_map[port_idx].set_channel_map ||
+		 multi_ch_maps[idx].set_channel_map)) {
+		if (port_channel_map[port_idx].set_channel_map)
+			memcpy(ep_payload->dev_channel_mapping,
+				port_channel_map[port_idx].channel_mapping,
+				PCM_FORMAT_MAX_NUM_CHANNEL_V8);
+		else
+			memcpy(ep_payload->dev_channel_mapping,
+				multi_ch_maps[idx].channel_mapping,
+				PCM_FORMAT_MAX_NUM_CHANNEL_V8);
 	} else {
 		if (channel_mode == 1) {
 			ep_payload->dev_channel_mapping[0] = PCM_CHANNEL_FC;
@@ -2829,8 +2903,14 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 
 	if ((topology == VPM_TX_SM_ECNS_V2_COPP_TOPOLOGY) ||
 	    (topology == VPM_TX_DM_FLUENCE_COPP_TOPOLOGY) ||
-	    (topology == VPM_TX_DM_RFECNS_COPP_TOPOLOGY))
+	    (topology == VPM_TX_DM_RFECNS_COPP_TOPOLOGY)||
+	    (topology == VPM_TX_DM_FLUENCE_EF_COPP_TOPOLOGY)) {
+		if ((rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_8K) &&
+		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_16K) &&
+		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_32K) &&
+		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_48K))
 		rate = 16000;
+	}
 
 	if (topology == VPM_TX_VOICE_SMECNS_V2_COPP_TOPOLOGY)
 		channel_mode = 1;
@@ -2937,8 +3017,6 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 			open_v8.endpoint_id_1 = tmp_port;
 			open_v8.endpoint_id_2 = 0xFFFF;
 			open_v8.endpoint_id_3 = 0xFFFF;
-
-
 			open_v8.topology_id = topology;
 			open_v8.reserved = 0;
 
@@ -2947,7 +3025,7 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 			ep1_payload.bit_width = bit_width;
 			ep1_payload.sample_rate  = rate;
 			ret = adm_arrange_mch_map_v8(&ep1_payload, path,
-					channel_mode);
+					channel_mode, port_idx);
 			if (ret)
 				return ret;
 
@@ -2977,7 +3055,6 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 				if (this_adm.ec_ref_rx_bit_width != 0) {
 					ep2_payload.bit_width =
 						this_adm.ec_ref_rx_bit_width;
-					this_adm.ec_ref_rx_bit_width = 0;
 				} else {
 					ep2_payload.bit_width = bit_width;
 				}
@@ -2985,7 +3062,6 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 				if (this_adm.ec_ref_rx_sampling_rate != 0) {
 					ep2_payload.sample_rate =
 					this_adm.ec_ref_rx_sampling_rate;
-					this_adm.ec_ref_rx_sampling_rate = 0;
 				} else {
 					ep2_payload.sample_rate = rate;
 				}
@@ -3053,7 +3129,6 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 
 			if (this_adm.ec_ref_rx && (path != 1)) {
 				open.endpoint_id_2 = this_adm.ec_ref_rx;
-				this_adm.ec_ref_rx = -1;
 			}
 
 			open.topology_id = topology;
@@ -3064,8 +3139,8 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 				(rate != ULL_SUPPORTED_SAMPLE_RATE));
 			open.sample_rate  = rate;
 
-			ret = adm_arrange_mch_map(&open, path, channel_mode);
-
+			ret = adm_arrange_mch_map(&open, path, channel_mode,
+						  port_idx);
 			if (ret)
 				return ret;
 
@@ -3085,12 +3160,10 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 				open_v6.hdr.pkt_size = sizeof(open_v6);
 				open_v6.dev_num_channel_eid2 =
 					this_adm.num_ec_ref_rx_chans;
-				this_adm.num_ec_ref_rx_chans = 0;
 
 				if (this_adm.ec_ref_rx_bit_width != 0) {
 					open_v6.bit_width_eid2 =
 						this_adm.ec_ref_rx_bit_width;
-					this_adm.ec_ref_rx_bit_width = 0;
 				} else {
 					open_v6.bit_width_eid2 = bit_width;
 				}
@@ -3098,7 +3171,6 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 				if (this_adm.ec_ref_rx_sampling_rate != 0) {
 					open_v6.sample_rate_eid2 =
 					       this_adm.ec_ref_rx_sampling_rate;
-					this_adm.ec_ref_rx_sampling_rate = 0;
 				} else {
 					open_v6.sample_rate_eid2 = rate;
 				}
@@ -3199,7 +3271,7 @@ void adm_copp_mfc_cfg(int port_id, int copp_idx, int dst_sample_rate)
 		atomic_read(&this_adm.copp.channels[port_idx][copp_idx]);
 
 	rc = adm_arrange_mch_map(&open, ADM_PATH_PLAYBACK,
-		mfc_cfg.num_channels);
+		mfc_cfg.num_channels, port_idx);
 	if (rc < 0) {
 		pr_err("%s: unable to get channal map\n", __func__);
 		goto fail_cmd;
@@ -3510,6 +3582,7 @@ int adm_close(int port_id, int perf_mode, int copp_idx)
 		return -EINVAL;
 	}
 
+	port_channel_map[port_idx].set_channel_map = false;
 	if (this_adm.copp.adm_delay[port_idx][copp_idx] && perf_mode
 		== LEGACY_PCM_MODE) {
 		atomic_set(&this_adm.copp.adm_delay_stat[port_idx][copp_idx],

@@ -15,6 +15,7 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <sound/soc.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -363,6 +364,7 @@ struct rx_macro_priv {
 	u16 mclk_mux;
 	struct mutex mclk_lock;
 	struct mutex swr_clk_lock;
+	struct mutex clk_lock;
 	struct rx_swr_ctrl_data *swr_ctrl_data;
 	struct rx_swr_ctrl_platform_data swr_plat_data;
 	struct work_struct rx_macro_add_child_devices_work;
@@ -459,6 +461,10 @@ static const struct soc_enum rx_macro_vbat_bcl_gsm_mode_enum =
 static const struct snd_kcontrol_new rx_int2_1_vbat_mix_switch[] = {
 	SOC_DAPM_SINGLE("RX AUX VBAT Enable", SND_SOC_NOPM, 0, 1, 0)
 };
+
+static const char * const hph_idle_detect_text[] = {"OFF", "ON"};
+
+static SOC_ENUM_SINGLE_EXT_DECL(hph_idle_detect_enum, hph_idle_detect_text);
 
 RX_MACRO_DAPM_ENUM(rx_int0_2, BOLERO_CDC_RX_INP_MUX_RX_INT0_CFG1, 0,
 		rx_int_mix_mux_text);
@@ -1051,7 +1057,7 @@ static int rx_macro_mclk_enable(struct rx_macro_priv *rx_priv,
 			ret = bolero_request_clock(rx_priv->dev,
 					RX_MACRO, mclk_mux, true);
 			if (ret < 0) {
-				dev_err(rx_priv->dev,
+				dev_err_ratelimited(rx_priv->dev,
 					"%s: rx request clock enable failed\n",
 					__func__);
 				goto exit;
@@ -1113,17 +1119,6 @@ static int rx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	dev_dbg(rx_dev, "%s: event = %d\n", __func__, event);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		/* if swr_clk_users > 0, call device down */
-		if (rx_priv->swr_clk_users > 0) {
-			if ((rx_priv->mclk_mux == MCLK_MUX0 &&
-			     rx_priv->is_native_on) ||
-			    (rx_priv->mclk_mux == MCLK_MUX1 &&
-			     !rx_priv->is_native_on)) {
-				swrm_wcd_notify(
-				rx_priv->swr_ctrl_data[0].rx_swr_pdev,
-				SWR_DEVICE_DOWN, NULL);
-			}
-		}
 		if (rx_priv->is_native_on)
 			mclk_freq = MCLK_FREQ_NATIVE;
 		swrm_wcd_notify(
@@ -1147,15 +1142,39 @@ static int rx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	return ret;
 }
 
+static int rx_macro_mclk_reset(struct device *dev)
+{
+	struct rx_macro_priv *rx_priv = dev_get_drvdata(dev);
+	int count = 0;
+
+	mutex_lock(&rx_priv->clk_lock);
+	while (__clk_is_enabled(rx_priv->rx_core_clk)) {
+		clk_disable_unprepare(rx_priv->rx_npl_clk);
+		clk_disable_unprepare(rx_priv->rx_core_clk);
+		count++;
+	}
+	dev_dbg(rx_priv->dev,
+			"%s: clock reset after ssr, count %d\n", __func__, count);
+	while (count) {
+		clk_prepare_enable(rx_priv->rx_core_clk);
+		clk_prepare_enable(rx_priv->rx_npl_clk);
+		count--;
+	}
+
+	mutex_unlock(&rx_priv->clk_lock);
+	return 0;
+}
+
 static int rx_macro_mclk_ctrl(struct device *dev, bool enable)
 {
 	struct rx_macro_priv *rx_priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	mutex_lock(&rx_priv->clk_lock);
 	if (enable) {
 		ret = clk_prepare_enable(rx_priv->rx_core_clk);
 		if (ret < 0) {
-			dev_err(dev, "%s:rx mclk enable failed\n", __func__);
+			dev_err_ratelimited(dev, "%s:rx mclk enable failed\n", __func__);
 			return ret;
 		}
 		ret = clk_prepare_enable(rx_priv->rx_npl_clk);
@@ -1183,6 +1202,7 @@ static int rx_macro_mclk_ctrl(struct device *dev, bool enable)
 		clk_disable_unprepare(rx_priv->rx_core_clk);
 	}
 
+	mutex_unlock(&rx_priv->clk_lock);
 	return 0;
 }
 
@@ -1235,6 +1255,9 @@ static int rx_macro_event_handler(struct snd_soc_codec *codec, u16 event,
 		swrm_wcd_notify(
 			rx_priv->swr_ctrl_data[0].rx_swr_pdev,
 			SWR_DEVICE_SSR_UP, NULL);
+		break;
+	case BOLERO_MACRO_EVT_CLK_RESET:
+		rx_macro_mclk_reset(rx_dev);
 		break;
 	}
 	return 0;
@@ -1598,6 +1621,8 @@ static int rx_macro_config_classh(struct snd_soc_codec *codec,
 		break;
 	case INTERP_AUX:
 		snd_soc_update_bits(codec, BOLERO_CDC_RX_RX2_RX_PATH_CFG0,
+				0x08, 0x08);
+		snd_soc_update_bits(codec, BOLERO_CDC_RX_RX2_RX_PATH_CFG0,
 				0x10, 0x10);
 		break;
 	}
@@ -1631,6 +1656,38 @@ static void rx_macro_hd2_control(struct snd_soc_codec *codec,
 		snd_soc_update_bits(codec, hd2_enable_reg, 0x04, 0x00);
 		snd_soc_update_bits(codec, hd2_scale_reg, 0x3C, 0x00);
 	}
+}
+
+static int rx_macro_hph_idle_detect_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct rx_macro_priv *rx_priv = NULL;
+	struct device *rx_dev = NULL;
+
+	if (!rx_macro_get_data(codec, &rx_dev, &rx_priv, __func__))
+		return -EINVAL;
+
+	ucontrol->value.integer.value[0] =
+		rx_priv->idle_det_cfg.hph_idle_detect_en;
+
+	return 0;
+}
+
+static int rx_macro_hph_idle_detect_put(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct rx_macro_priv *rx_priv = NULL;
+	struct device *rx_dev = NULL;
+
+	if (!rx_macro_get_data(codec, &rx_dev, &rx_priv, __func__))
+		return -EINVAL;
+
+	rx_priv->idle_det_cfg.hph_idle_detect_en =
+		ucontrol->value.integer.value[0];
+
+	return 0;
 }
 
 static int rx_macro_get_compander(struct snd_kcontrol *kcontrol,
@@ -2104,14 +2161,16 @@ static int rx_macro_enable_interp_clk(struct snd_soc_codec *codec,
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
 	dsm_reg = BOLERO_CDC_RX_RX0_RX_PATH_DSM_CTL +
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
+	if (interp_idx == INTERP_AUX)
+		dsm_reg = BOLERO_CDC_RX_RX2_RX_PATH_DSM_CTL;
 	rx_cfg2_reg = BOLERO_CDC_RX_RX0_RX_PATH_CFG2 +
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
 
 	if (SND_SOC_DAPM_EVENT_ON(event)) {
 		if (rx_priv->main_clk_users[interp_idx] == 0) {
-			snd_soc_update_bits(codec, dsm_reg, 0x01, 0x01);
 			/* Main path PGA mute enable */
 			snd_soc_update_bits(codec, main_reg, 0x10, 0x10);
+			snd_soc_update_bits(codec, dsm_reg, 0x01, 0x01);
 			/* Clk enable */
 			snd_soc_update_bits(codec, main_reg, 0x20, 0x20);
 			snd_soc_update_bits(codec, rx_cfg2_reg, 0x03, 0x03);
@@ -2510,6 +2569,9 @@ static const struct snd_kcontrol_new rx_macro_snd_controls[] = {
 		rx_macro_get_compander, rx_macro_set_compander),
 	SOC_SINGLE_EXT("RX_COMP2 Switch", SND_SOC_NOPM, RX_MACRO_COMP2, 1, 0,
 		rx_macro_get_compander, rx_macro_set_compander),
+
+	SOC_ENUM_EXT("HPH Idle Detect", hph_idle_detect_enum,
+		rx_macro_hph_idle_detect_get, rx_macro_hph_idle_detect_put),
 
 	SOC_ENUM_EXT("RX_EAR Mode", rx_macro_ear_mode_enum,
 		rx_macro_get_ear_mode, rx_macro_put_ear_mode),
@@ -3120,7 +3182,7 @@ static int rx_swrm_clock(void *handle, bool enable)
 		if (rx_priv->swr_clk_users == 0) {
 			ret = rx_macro_mclk_enable(rx_priv, 1, true);
 			if (ret < 0) {
-				dev_err(rx_priv->dev,
+				dev_err_ratelimited(rx_priv->dev,
 					"%s: rx request clock enable failed\n",
 					__func__);
 				goto exit;
@@ -3513,6 +3575,7 @@ static int rx_macro_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, rx_priv);
 	mutex_init(&rx_priv->mclk_lock);
 	mutex_init(&rx_priv->swr_clk_lock);
+	mutex_init(&rx_priv->clk_lock);
 	rx_macro_init_ops(&ops, rx_io_base);
 
 	ret = bolero_register_macro(&pdev->dev, RX_MACRO, &ops);
@@ -3528,6 +3591,7 @@ static int rx_macro_probe(struct platform_device *pdev)
 err_reg_macro:
 	mutex_destroy(&rx_priv->mclk_lock);
 	mutex_destroy(&rx_priv->swr_clk_lock);
+	mutex_destroy(&rx_priv->clk_lock);
 	return ret;
 }
 
@@ -3548,6 +3612,7 @@ static int rx_macro_remove(struct platform_device *pdev)
 	bolero_unregister_macro(&pdev->dev, RX_MACRO);
 	mutex_destroy(&rx_priv->mclk_lock);
 	mutex_destroy(&rx_priv->swr_clk_lock);
+	mutex_destroy(&rx_priv->clk_lock);
 	kfree(rx_priv->swr_ctrl_data);
 	return 0;
 }
