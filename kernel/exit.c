@@ -83,6 +83,7 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
 		adj_chain_detach(p);
 #endif
 		list_del_rcu(&p->tasks);
+		delete_from_adj_tree(p);
 		list_del_init(&p->sibling);
 		__this_cpu_dec(process_counts);
 	}

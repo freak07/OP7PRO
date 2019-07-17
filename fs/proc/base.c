@@ -1072,7 +1072,9 @@ static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 #ifdef CONFIG_MEMPLUS
 	prev_adj = task->signal->oom_score_adj;
 #endif
+	delete_from_adj_tree(task);
 	task->signal->oom_score_adj = oom_adj;
+	add_2_adj_tree(task);
 #ifdef CONFIG_ADJ_CHAIN
 	adj_chain_update_oom_score_adj(task);
 #endif
@@ -1097,7 +1099,9 @@ static int __set_oom_adj(struct file *file, int oom_adj, bool legacy)
 			need_update_oom_score_adj = 0;
 #endif
 			if (!p->vfork_done && process_shares_mm(p, mm)) {
+				delete_from_adj_tree(task);
 				p->signal->oom_score_adj = oom_adj;
+				add_2_adj_tree(task);
 #ifdef CONFIG_ADJ_CHAIN
 				need_update_oom_score_adj = 1;
 #endif
