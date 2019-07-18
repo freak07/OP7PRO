@@ -3480,6 +3480,9 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SOC_REPORTING_READY:
 		pval->intval = fg->soc_reporting_ready;
 		break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		pval->intval = 0;
+		break;
 	case POWER_SUPPLY_PROP_CLEAR_SOH:
 		pval->intval = chip->first_profile_load;
 		break;
