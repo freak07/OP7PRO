@@ -336,6 +336,7 @@ struct cam_hw_cmd_args {
  * @hw_flush:                  Function pointer for HW flush
  * @hw_dump:                   Function pointer for HW dump
  * @hw_reset:                  Function pointer for HW reset
+ * @hw_dump:                   Function pointer for HW dump
  *
  */
 struct cam_hw_mgr_intf {
@@ -358,6 +359,7 @@ struct cam_hw_mgr_intf {
 	int (*hw_flush)(void *hw_priv, void *hw_flush_args);
 	int (*hw_dump)(void *hw_priv, void *hw_dump_args);
 	int (*hw_reset)(void *hw_priv, void *hw_reset_args);
+	int (*hw_dump)(void *hw_priv, void *hw_dump_args);
 };
 
 #endif /* _CAM_HW_MGR_INTF_H_ */
