@@ -2049,6 +2049,8 @@ static int msm_pdev_probe(struct platform_device *pdev)
 	if (!match)
 		return -ENODEV;
 
+	device_enable_async_suspend(&pdev->dev);
+
 	/* on all devices that I am aware of, iommu's which can map
 	 * any address the cpu can see are used:
 	 */
