@@ -2446,6 +2446,7 @@ void tcp_write_queue_purge(struct sock *sk)
 		tcp_skb_tsorted_anchor_cleanup(skb);
 		sk_wmem_free_skb(sk, skb);
 	}
+	tcp_init_send_head(sk);
 	tcp_rtx_queue_purge(sk);
 	skb = sk->sk_tx_skb_cache;
 	if (skb) {
