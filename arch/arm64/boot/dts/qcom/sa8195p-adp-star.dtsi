@@ -12,6 +12,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include "sa8195p-adp-star-display.dtsi"
+#include "sa8195p-cnss.dtsi"
 
 &qupv3_se0_spi {
 	status = "ok";
@@ -36,6 +37,10 @@
 	status = "ok";
 };
 
+&qupv3_se13_4uart{
+	status = "ok";
+};
+
 &sdhc_2 {
 	vdd-supply = <&pm8195_1_l10>;
 	qcom,vdd-voltage-level = <2950000 2960000>;
@@ -54,4 +59,36 @@
 	cd-gpios = <&pm8195_1_gpios 4 GPIO_ACTIVE_LOW>;
 
 	status = "ok";
+};
+
+&pil_lpass {
+	status = "ok";
+};
+
+&pil_ssc {
+	status = "disabled";
+};
+
+&pil_spss {
+	status = "ok";
+};
+
+&pil_turing {
+	status = "ok";
+};
+
+&pil_venus {
+	status = "ok";
+};
+
+&pil_npu {
+	status = "ok";
+};
+
+&glink_modem {
+	status = "disabled";
+};
+
+&ssc_sensors {
+	status = "disabled";
 };

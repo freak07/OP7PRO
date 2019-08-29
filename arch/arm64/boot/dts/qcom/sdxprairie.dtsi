@@ -691,7 +691,7 @@
 		};
 	};
 
-	qcom,mhi_dev_qrtr {
+	mhi_dev_qrtr: qcom,mhi_dev_qrtr {
 		compatible = "qcom,qrtr-mhi-dev";
 		qcom,net-id = <3>;
 	};
@@ -1044,9 +1044,9 @@
 		qcom,cpulist = <&CPU0>;
 		qcom,target-dev = <&cpubw>;
 		qcom,core-dev-table =
-				<  153600 MHZ_TO_MBPS( 300, 4) >,
-				<  576000 MHZ_TO_MBPS(1017, 4) >,
-				< 1497600 MHZ_TO_MBPS(1804, 4)>;
+				<  576000 MHZ_TO_MBPS( 300, 4) >,
+				< 1497600 MHZ_TO_MBPS(1017, 4) >,
+				< 1555200 MHZ_TO_MBPS(1804, 4)>;
 	};
 
 	cnss_qca6390: qcom,cnss-qca6390@a0000000 {
@@ -1358,6 +1358,12 @@
 			interrupt-names = "mhi-device-inta";
 			qcom,mhi-ifc-id = <0x030617cb>;
 			qcom,mhi-interrupt;
+		status = "disabled";
+	};
+
+	mhi_net_device: qcom,mhi_net_dev {
+		compatible = "qcom,msm-mhi-dev-net";
+		qcom,mhi-ethernet-interface;
 		status = "disabled";
 	};
 
