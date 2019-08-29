@@ -150,7 +150,6 @@ struct cam_isp_prepare_hw_update_data {
 struct cam_isp_hw_sof_event_data {
 	uint64_t       timestamp;
 	uint64_t       boot_time;
-	uint64_t       irq_mono_boot_time;
 };
 
 /**
@@ -162,7 +161,6 @@ struct cam_isp_hw_sof_event_data {
  */
 struct cam_isp_hw_reg_update_event_data {
 	uint64_t       timestamp;
-	uint64_t       irq_mono_boot_time;
 };
 
 /**
@@ -173,7 +171,6 @@ struct cam_isp_hw_reg_update_event_data {
  */
 struct cam_isp_hw_epoch_event_data {
 	uint64_t       timestamp;
-	uint64_t       irq_mono_boot_time;
 };
 
 /**
@@ -189,7 +186,6 @@ struct cam_isp_hw_done_event_data {
 	uint32_t             resource_handle[
 				CAM_NUM_OUT_PER_COMP_IRQ_MAX];
 	uint64_t       timestamp;
-	uint64_t       irq_mono_boot_time;
 };
 
 /**
@@ -200,7 +196,6 @@ struct cam_isp_hw_done_event_data {
  */
 struct cam_isp_hw_eof_event_data {
 	uint64_t       timestamp;
-	uint64_t       irq_mono_boot_time;
 };
 
 /**
