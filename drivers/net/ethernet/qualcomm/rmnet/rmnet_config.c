@@ -397,12 +397,14 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 	}
 
 	if (data[IFLA_RMNET_UL_AGG_PARAMS]) {
-		struct rmnet_egress_agg_params *agg_params;
+		void *agg_params;
+		unsigned long irq_flags;
 
 		agg_params = nla_data(data[IFLA_RMNET_UL_AGG_PARAMS]);
-		rmnet_map_update_ul_agg_config(port, agg_params->agg_size,
-					       agg_params->agg_count,
-					       agg_params->agg_time);
+		spin_lock_irqsave(&port->agg_lock, irq_flags);
+		memcpy(&port->egress_agg_params, agg_params,
+		       sizeof(port->egress_agg_params));
+		spin_unlock_irqrestore(&port->agg_lock, irq_flags);
 	}
 
 	return 0;
