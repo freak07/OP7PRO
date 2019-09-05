@@ -125,7 +125,6 @@ struct mtp_dev {
 
 	wait_queue_head_t read_wq;
 	wait_queue_head_t write_wq;
-	wait_queue_head_t intr_wq;
 	struct usb_request *rx_req[RX_REQ_MAX];
 	int rx_done;
 
@@ -501,8 +500,6 @@ static void mtp_complete_intr(struct usb_ep *ep, struct usb_request *req)
 
 	mtp_log("sent event, put back request\n");
 	mtp_req_put(dev, &dev->intr_idle, req);
-
-	wake_up(&dev->intr_wq);
 }
 
 static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
@@ -1072,21 +1069,15 @@ static int mtp_send_event(struct mtp_dev *dev, struct mtp_event *event)
 	if (dev->state == STATE_OFFLINE)
 		return -ENODEV;
 
-	ret = wait_event_interruptible_timeout(dev->intr_wq,
-			(req = mtp_req_get(dev, &dev->intr_idle)),
-			msecs_to_jiffies(32));
-	mtp_log("wait_event_interruptible_timeout ret:%d\n", ret);
-	if (!req) {
-		mtp_log("timedout, no req available\n");
-		return -ETIME;
-	}
+	req = mtp_req_get(dev, &dev->intr_idle);
+	if (!req)
+		return -EBUSY;
 
 	if (copy_from_user(req->buf, (void __user *)event->data, length)) {
 		mtp_req_put(dev, &dev->intr_idle, req);
 		return -EFAULT;
 	}
 	req->length = length;
-	mtp_log("got request queueing on intr_ep:\n");
 	ret = usb_ep_queue(dev->ep_intr, req, GFP_KERNEL);
 	if (ret)
 		mtp_req_put(dev, &dev->intr_idle, req);
@@ -1717,7 +1708,6 @@ static int __mtp_setup(struct mtp_instance *fi_mtp)
 	spin_lock_init(&dev->lock);
 	init_waitqueue_head(&dev->read_wq);
 	init_waitqueue_head(&dev->write_wq);
-	init_waitqueue_head(&dev->intr_wq);
 	atomic_set(&dev->open_excl, 0);
 	atomic_set(&dev->ioctl_excl, 0);
 	INIT_LIST_HEAD(&dev->tx_idle);
