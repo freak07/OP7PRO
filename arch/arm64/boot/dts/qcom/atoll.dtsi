@@ -24,6 +24,7 @@
 #include <dt-bindings/clock/qcom,cpucc-sm8150.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/msm/msm-bus-ids.h>
+#include <dt-bindings/regulator/qcom,rpm-smd-regulator.h>
 #include <dt-bindings/soc/qcom,tcs-mbox.h>
 
 #define MHZ_TO_MBPS(mhz, w) ((mhz * 1000000 * w) / (1024 * 1024))
@@ -40,6 +41,9 @@
 		sdhc1 = &sdhc_1; /* eMMC */
 		sdhc2 = &sdhc_2; /* SD Card */
 		ufshc1 = &ufshc_mem; /* Embedded UFS slot */
+		swr0 = &swr0;
+		swr1 = &swr1;
+		swr2 = &swr2;
 	};
 
 	cpus {
@@ -1708,8 +1712,8 @@
 			<0x18325800 0x1400>;
 		reg-names = "osm_l3_base", "osm_pwrcl_base",
 			"osm_perfcl_base";
+		l3-devs = <&cpu0_cpu_l3_lat &cpu6_cpu_l3_lat>;
 		#clock-cells = <1>;
-		status = "disabled";
 	};
 
 	cpucc_debug: syscon@182a0018 {
@@ -2705,10 +2709,10 @@
 		qca,bt-vdd-pa-supply = <&pm6150l_l10>;  /* CH0 */
 		qca,bt-vdd-xtal-supply = <&pm6150l_l1>;/* X0 */
 
-		qca,bt-vdd-io-voltage-level = <1721000 1829000>;
-		qca,bt-vdd-core-voltage-level = <1200000 1350000>;
-		qca,bt-vdd-pa-voltage-level = <3300000 3400000>;
-		qca,bt-vdd-xtal-voltage-level = <1620000 1980000>;
+		qca,bt-vdd-io-voltage-level = <1700000 1900000>;
+		qca,bt-vdd-core-voltage-level = <1245000 1350000>;
+		qca,bt-vdd-pa-voltage-level = <3200000 3400000>;
+		qca,bt-vdd-xtal-voltage-level = <1700000 1900000>;
 
 		qca,bt-vdd-io-current-level = <1>; /* LPM/PFM */
 		qca,bt-vdd-core-current-level = <1>; /* LPM/PFM */
@@ -3206,10 +3210,12 @@
 };
 
 &bps_gdsc {
+	qcom,support-hw-trigger;
 	status = "ok";
 };
 
 &ipe_0_gdsc {
+	qcom,support-hw-trigger;
 	status = "ok";
 };
 
@@ -3244,6 +3250,7 @@
 };
 
 &vcodec0_gdsc {
+	qcom,support-hw-trigger;
 	status = "ok";
 };
 
@@ -3275,6 +3282,13 @@
 &pm6150_vadc {
 	pinctrl-names = "default";
 	pinctrl-0 = <&nvm_therm_default &sdm_skin_therm_default>;
+
+	smb1390_therm {
+		reg = <ADC_AMUX_THM2>;
+		label = "smb1390_therm";
+		qcom,hw-settle-time = <200>;
+		qcom,pre-scaling = <1 1>;
+	};
 
 	chg_skin_therm {
 		reg = <ADC_AMUX_THM1_PU2>;
@@ -3423,6 +3437,8 @@
 #include "atoll-audio.dtsi"
 #include "atoll-thermal.dtsi"
 #include "atoll-camera.dtsi"
+#include "atoll-sde-pll.dtsi"
+#include "atoll-sde.dtsi"
 
 &qupv3_se9_i2c {
 	status = "ok";

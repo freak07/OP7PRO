@@ -2014,11 +2014,8 @@ static int __cam_isp_ctx_rdi_only_sof_in_top_state(
 		ctx_isp->frame_id, ctx_isp->sof_timestamp_val);
 
 	/*
-	 * notify reqmgr with sof signal. Note, due to scheduling delay
-	 * we can run into situation that two active requests has already
-	 * be in the active queue while we try to do the notification.
-	 * In this case, we need to skip the current notification. This
-	 * helps the state machine to catch up the delay.
+	 * Note, always notify SOF to CRM, since there is
+	 * another mechnism to handle irq delay
 	 */
 	if (ctx->ctx_crm_intf && ctx->ctx_crm_intf->notify_trigger) {
 		notify.link_hdl = ctx->link_hdl;
