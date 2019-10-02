@@ -2298,6 +2298,11 @@
 		};
 	};
 
+	aop-msg-client {
+		compatible = "qcom,debugfs-qmp-client";
+		mboxes = <&qmp_aop 0>;
+		mbox-names = "aop";
+	};
 };
 
 &emac_gdsc {
@@ -2508,6 +2513,7 @@
 #include "sdmshrike-usb.dtsi"
 #include "sdmshrike-qupv3.dtsi"
 #include "sm8150-audio.dtsi"
+#include "sm8150-vidc.dtsi"
 #include "sm8150-pm.dtsi"
 #include "sdmshrike-gpu.dtsi"
 #include "sdmshrike-thermal.dtsi"

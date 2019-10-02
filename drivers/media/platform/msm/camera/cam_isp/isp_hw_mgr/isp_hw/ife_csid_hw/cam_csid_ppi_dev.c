@@ -21,7 +21,7 @@
 #include "cam_debug_util.h"
 
 static struct cam_hw_intf *cam_csid_ppi_hw_list[CAM_CSID_PPI_HW_MAX] = {
-	0, 0, 0, 0};
+	NULL, NULL, NULL, NULL};
 static char ppi_dev_name[8];
 
 int cam_csid_ppi_probe(struct platform_device *pdev)
