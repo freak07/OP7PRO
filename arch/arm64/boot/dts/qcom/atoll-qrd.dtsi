@@ -15,8 +15,10 @@
 #include <dt-bindings/iio/qcom,spmi-vadc.h>
 #include <dt-bindings/input/input.h>
 #include "atoll-audio-overlay.dtsi"
+
 #include "atoll-camera-sensor-qrd.dtsi"
 #include "atoll-sde-display.dtsi"
+#include "sdmmagpie-thermal-overlay.dtsi"
 
 &tlmm {
 	fpc_reset_int: fpc_reset_int {
@@ -125,6 +127,7 @@
 	dpdm-supply = <&qusb_phy0>;
 	qcom,charger-temp-max = <800>;
 	qcom,smb-temp-max = <800>;
+	qcom,disable-sw-thermal-regulation;
 };
 
 &usb0 {
@@ -254,7 +257,7 @@
 	pinctrl-0 = <&sdc2_clk_on  &sdc2_cmd_on &sdc2_data_on &sdc2_cd_on>;
 	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off &sdc2_cd_off>;
 
-	cd-gpios = <&tlmm 69 GPIO_ACTIVE_LOW>;
+	cd-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 
 	status = "ok";
 };

@@ -335,6 +335,39 @@ static int __cam_node_handle_dump_dev(struct cam_node *node,
 	return rc;
 }
 
+static int __cam_node_handle_dump_dev(struct cam_node *node,
+	struct cam_dump_req_cmd *dump)
+{
+	struct cam_context *ctx = NULL;
+	int rc;
+
+	if (!dump)
+		return -EINVAL;
+
+	if (dump->dev_handle <= 0) {
+		CAM_ERR(CAM_CORE, "Invalid device handle for context");
+		return -EINVAL;
+	}
+
+	if (dump->session_handle <= 0) {
+		CAM_ERR(CAM_CORE, "Invalid session handle for context");
+		return -EINVAL;
+	}
+
+	ctx = (struct cam_context *)cam_get_device_priv(dump->dev_handle);
+	if (!ctx) {
+		CAM_ERR(CAM_CORE, "Can not get context for handle %d",
+			dump->dev_handle);
+		return -EINVAL;
+	}
+
+	rc = cam_context_handle_dump_dev(ctx, dump);
+	if (rc)
+		CAM_ERR(CAM_CORE, "Flush failure for node %s", node->name);
+
+	return rc;
+}
+
 static int __cam_node_handle_release_dev(struct cam_node *node,
 	struct cam_release_dev_cmd *release)
 {

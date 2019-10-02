@@ -273,6 +273,21 @@ struct cam_hw_dump_args {
 	void             *ctxt_to_hw_map;
 };
 
+/**
+ * struct cam_hw_dump_args - Dump arguments
+ *
+ * @request_id:            request_id
+ * @buf_handle:            Buffer handle
+ * @offset:                Buffer offset. This is updated by the drivers.
+ * @ctxt_to_hw_map:        HW context from the acquire
+ */
+struct cam_hw_dump_args {
+	uint64_t          request_id;
+	uint32_t          buf_handle;
+	int32_t           offset;
+	void             *ctxt_to_hw_map;
+};
+
 /* enum cam_hw_mgr_command - Hardware manager command type */
 enum cam_hw_mgr_command {
 	CAM_HW_MGR_CMD_INTERNAL,
