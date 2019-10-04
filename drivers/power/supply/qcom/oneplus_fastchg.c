@@ -251,7 +251,7 @@ static void init_enhance_dash_exist_node(void)
 }
 
 //for mcu_data irq delay issue 2017.10.14@Infi
-extern void msm_cpuidle_set_sleep_disable(bool disable);
+//extern void msm_cpuidle_set_sleep_disable(bool disable);
 
 void opchg_set_data_active(struct fastchg_device_info *chip)
 {
@@ -874,7 +874,7 @@ void switch_mode_to_normal(void)
 {
 	usb_sw_gpio_set(0);
 	mcu_en_gpio_set(1);
-	msm_cpuidle_set_sleep_disable(false);
+	//msm_cpuidle_set_sleep_disable(false);
 	op_check_charger_collapse_rerun_aicl();
 }
 
@@ -1167,7 +1167,7 @@ static long  dash_dev_ioctl(struct file *filp, unsigned int cmd,
 				di->fast_chg_error = false;
 				dash_write(di, ALLOW_DATA);
 				di->fast_chg_started = true;
-				msm_cpuidle_set_sleep_disable(true);
+				//msm_cpuidle_set_sleep_disable(true);
 			}
 			break;
 		case DASH_NOTIFY_FAST_ABSENT:
