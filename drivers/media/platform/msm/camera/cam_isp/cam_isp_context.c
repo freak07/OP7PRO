@@ -257,6 +257,9 @@ static int __cam_isp_ctx_enqueue_init_request(
 				req_isp_new->num_cfg);
 			req_isp_old->num_cfg += req_isp_new->num_cfg;
 
+			memcpy(&req_old->pf_data, &req->pf_data,
+				sizeof(struct cam_hw_mgr_dump_pf_data));
+
 			req_old->request_id = req->request_id;
 
 			list_add_tail(&req->list, &ctx->free_req_list);
@@ -1140,7 +1143,7 @@ static int __cam_isp_ctx_handle_error(struct cam_isp_context *ctx_isp,
 	struct cam_isp_ctx_req          *req_isp = NULL;
 	struct cam_isp_ctx_req          *req_isp_to_report = NULL;
 	struct cam_req_mgr_error_notify  notify;
-	uint64_t                         error_request_id;
+	uint64_t                         error_request_id = 0;
 	struct cam_hw_fence_map_entry   *fence_map_out = NULL;
 	struct cam_req_mgr_message       req_msg;
 

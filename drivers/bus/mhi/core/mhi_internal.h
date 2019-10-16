@@ -446,6 +446,11 @@ extern const char * const mhi_state_str[MHI_STATE_MAX];
 				  !mhi_state_str[state]) ? \
 				"INVALID_STATE" : mhi_state_str[state])
 
+extern const char * const mhi_log_level_str[MHI_MSG_LVL_MAX];
+#define TO_MHI_LOG_LEVEL_STR(level) ((level >= MHI_MSG_LVL_MAX || \
+				  !mhi_log_level_str[level]) ? \
+				"Mask all" : mhi_log_level_str[level])
+
 enum {
 	MHI_PM_BIT_DISABLE,
 	MHI_PM_BIT_POR,
@@ -797,8 +802,8 @@ void *mhi_to_virtual(struct mhi_ring *ring, dma_addr_t addr);
 int mhi_init_timesync(struct mhi_controller *mhi_cntrl);
 int mhi_create_timesync_sysfs(struct mhi_controller *mhi_cntrl);
 void mhi_destroy_timesync(struct mhi_controller *mhi_cntrl);
-int mhi_create_vote_sysfs(struct mhi_controller *mhi_cntrl);
-void mhi_destroy_vote_sysfs(struct mhi_controller *mhi_cntrl);
+int mhi_create_sysfs(struct mhi_controller *mhi_cntrl);
+void mhi_destroy_sysfs(struct mhi_controller *mhi_cntrl);
 int mhi_early_notify_device(struct device *dev, void *data);
 
 /* timesync log support */
@@ -868,6 +873,8 @@ void mhi_deinit_free_irq(struct mhi_controller *mhi_cntrl);
 int mhi_dtr_init(void);
 void mhi_rddm_prepare(struct mhi_controller *mhi_cntrl,
 		      struct image_info *img_info);
+int mhi_prepare_channel(struct mhi_controller *mhi_cntrl,
+			struct mhi_chan *mhi_chan);
 
 /* isr handlers */
 irqreturn_t mhi_msi_handlr(int irq_number, void *dev);
