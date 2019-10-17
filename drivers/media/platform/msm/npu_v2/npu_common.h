@@ -13,9 +13,8 @@
 #ifndef _NPU_COMMON_H
 #define _NPU_COMMON_H
 
-/* -------------------------------------------------------------------------
+/*
  * Includes
- * -------------------------------------------------------------------------
  */
 #include <asm/dma-iommu.h>
 #include <linux/cdev.h>
@@ -35,9 +34,8 @@
 
 #include "npu_mgr.h"
 
-/* -------------------------------------------------------------------------
+/*
  * Defines
- * -------------------------------------------------------------------------
  */
 #define NPU_MAX_MBOX_NUM	    4
 #define NPU_MBOX_LOW_PRI	    0
@@ -49,13 +47,10 @@
 
 #define NUM_MAX_CLK_NUM			48
 #define NPU_MAX_REGULATOR_NUM	2
-#define NPU_MAX_DT_NAME_LEN		21
+#define NPU_MAX_DT_NAME_LEN	    21
 #define NPU_MAX_PWRLEVELS		8
-#define NPU_MAX_STATS_BUF_SIZE	16384
-#define NPU_MAX_PATCH_NUM		160
+#define NPU_MAX_STATS_BUF_SIZE 16384
 #define NPU_MAX_BW_DEVS			4
-
-#define PERF_MODE_DEFAULT 0
 
 enum npu_power_level {
 	NPU_PWRLEVEL_MINSVS = 0,
@@ -78,9 +73,8 @@ enum npu_power_level {
 #define NPU_DBG(fmt, args...)                           \
 	pr_debug("NPU_DBG: %s: %d " fmt, __func__,  __LINE__, ##args)
 
-/* -------------------------------------------------------------------------
+/*
  * Data Structures
- * -------------------------------------------------------------------------
  */
 struct npu_smmu_ctx {
 	int domain;
@@ -136,7 +130,7 @@ struct npu_mbox {
 	bool send_data_pending;
 };
 
-/**
+/*
  * struct npul_pwrlevel - Struct holding different pwrlevel info obtained from
  * from dtsi file
  * @pwr_level:           NPU power level
@@ -159,7 +153,7 @@ struct npu_reg {
 	bool valid;
 };
 
-/**
+/*
  * struct npu_pwrctrl - Power control settings for a NPU device
  * @pwr_vote_num - voting information for power enable
  * @pwrlevels - List of supported power levels
@@ -173,8 +167,6 @@ struct npu_reg {
  * @uc_pwrlevel - power level from user driver setting
  * @perf_mode_override - perf mode from sysfs to override perf mode
  *                       settings from user driver
- * @dcvs_mode - dcvs mode from sysfs to turn on dcvs mode
- *              settings from user driver
  * @devbw - bw device
  */
 struct npu_pwrctrl {
@@ -194,11 +186,9 @@ struct npu_pwrctrl {
 	uint32_t cdsprm_pwrlevel;
 	uint32_t fmax_pwrlevel;
 	uint32_t perf_mode_override;
-	uint32_t dcvs_mode;
-	uint32_t cur_dcvs_activity;
 };
 
-/**
+/*
  * struct npu_thermalctrl - Thermal control settings for a NPU device
  * @max_state - maximum thermal mitigation state
  * @current_state - current thermal mitigation state
@@ -259,7 +249,7 @@ struct npu_device {
 	struct npu_io_data core_io;
 	struct npu_io_data tcm_io;
 	struct npu_io_data cc_io;
-	struct npu_io_data tcsr_io;
+	struct npu_io_data qdsp_io;
 	struct npu_io_data apss_shared_io;
 	struct npu_io_data qfprom_io;
 
@@ -317,9 +307,8 @@ struct ipcc_mbox_chan {
 	struct npu_device *npu_dev;
 };
 
-/* -------------------------------------------------------------------------
+/*
  * Function Prototypes
- * -------------------------------------------------------------------------
  */
 int npu_debugfs_init(struct npu_device *npu_dev);
 void npu_debugfs_deinit(struct npu_device *npu_dev);

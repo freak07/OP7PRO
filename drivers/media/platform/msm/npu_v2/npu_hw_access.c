@@ -10,9 +10,8 @@
  * GNU General Public License for more details.
  */
 
-/* -------------------------------------------------------------------------
+/*
  * Includes
- * -------------------------------------------------------------------------
  */
 #include <linux/msm_dma_iommu_mapping.h>
 #include <soc/qcom/subsystem_restart.h>
@@ -23,102 +22,80 @@
 #include "npu_common.h"
 #include "npu_hw.h"
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Register
- * -------------------------------------------------------------------------
  */
-static uint32_t npu_reg_read(void __iomem *base, size_t size, uint32_t off)
-{
-	if (!base) {
-		NPU_ERR("NULL base address\n");
-		return 0;
-	}
-
-	if ((off % 4) != 0) {
-		NPU_ERR("offset %x is not aligned\n", off);
-		return 0;
-	}
-
-	if (off >= size) {
-		NPU_ERR("offset exceeds io region %x:%x\n", off, size);
-		return 0;
-	}
-
-	return readl_relaxed(base + off);
-}
-
-static void npu_reg_write(void __iomem *base, size_t size, uint32_t off,
-	uint32_t val)
-{
-	if (!base) {
-		NPU_ERR("NULL base address\n");
-		return;
-	}
-
-	if ((off % 4) != 0) {
-		NPU_ERR("offset %x is not aligned\n", off);
-		return;
-	}
-
-	if (off >= size) {
-		NPU_ERR("offset exceeds io region %x:%x\n", off, size);
-		return;
-	}
-
-	writel_relaxed(val, base + off);
-	__iowmb();
-}
-
 uint32_t npu_core_reg_read(struct npu_device *npu_dev, uint32_t off)
 {
-	return npu_reg_read(npu_dev->core_io.base, npu_dev->core_io.size, off);
+	uint32_t ret = 0;
+
+	ret = readl_relaxed(npu_dev->core_io.base + off);
+	return ret;
 }
 
 void npu_core_reg_write(struct npu_device *npu_dev, uint32_t off, uint32_t val)
 {
-	npu_reg_write(npu_dev->core_io.base, npu_dev->core_io.size,
-		off, val);
+	writel_relaxed(val, npu_dev->core_io.base + off);
+	__iowmb();
 }
 
-uint32_t npu_tcsr_reg_read(struct npu_device *npu_dev, uint32_t off)
+uint32_t npu_qdsp_reg_read(struct npu_device *npu_dev, uint32_t off)
 {
-	return npu_reg_read(npu_dev->tcsr_io.base, npu_dev->tcsr_io.size, off);
+	uint32_t ret = 0;
+
+	ret = readl_relaxed(npu_dev->qdsp_io.base + off);
+	return ret;
+}
+
+void npu_qdsp_reg_write(struct npu_device *npu_dev, uint32_t off, uint32_t val)
+{
+	writel_relaxed(val, npu_dev->qdsp_io.base + off);
+	__iowmb();
 }
 
 uint32_t npu_apss_shared_reg_read(struct npu_device *npu_dev, uint32_t off)
 {
-	return npu_reg_read(npu_dev->apss_shared_io.base,
-		npu_dev->apss_shared_io.size, off);
+	uint32_t ret = 0;
+
+	ret = readl_relaxed(npu_dev->apss_shared_io.base + off);
+	return ret;
 }
 
 void npu_apss_shared_reg_write(struct npu_device *npu_dev, uint32_t off,
 	uint32_t val)
 {
-	npu_reg_write(npu_dev->apss_shared_io.base,
-		npu_dev->apss_shared_io.size, off, val);
+	writel_relaxed(val, npu_dev->apss_shared_io.base + off);
+	__iowmb();
 }
 
 uint32_t npu_cc_reg_read(struct npu_device *npu_dev, uint32_t off)
 {
-	return npu_reg_read(npu_dev->cc_io.base, npu_dev->cc_io.size, off);
+	uint32_t ret = 0;
+
+	ret = readl_relaxed(npu_dev->cc_io.base + off);
+
+	return ret;
 }
 
 void npu_cc_reg_write(struct npu_device *npu_dev, uint32_t off,
 	uint32_t val)
 {
-	npu_reg_write(npu_dev->cc_io.base, npu_dev->cc_io.size,
-		off, val);
+	writel_relaxed(val, npu_dev->cc_io.base + off);
+	__iowmb();
 }
 
 uint32_t npu_qfprom_reg_read(struct npu_device *npu_dev, uint32_t off)
 {
-	return npu_reg_read(npu_dev->qfprom_io.base,
-		npu_dev->qfprom_io.size, off);
+	uint32_t ret = 0;
+
+	if (npu_dev->qfprom_io.base)
+		ret = readl_relaxed(npu_dev->qfprom_io.base + off);
+
+	return ret;
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Memory
- * -------------------------------------------------------------------------
  */
 void npu_mem_write(struct npu_device *npu_dev, void *dst, void *src,
 	uint32_t size)
@@ -128,13 +105,6 @@ void npu_mem_write(struct npu_device *npu_dev, void *dst, void *src,
 	uint8_t *src_ptr8 = NULL;
 	uint32_t i = 0;
 	uint32_t num = 0;
-
-	if (dst_off >= npu_dev->tcm_io.size ||
-		(npu_dev->tcm_io.size - dst_off) < size) {
-		NPU_ERR("memory write exceeds io region %x:%x:%x\n",
-			dst_off, size, npu_dev->tcm_io.size);
-		return;
-	}
 
 	num = size/4;
 	for (i = 0; i < num; i++) {
@@ -162,13 +132,6 @@ int32_t npu_mem_read(struct npu_device *npu_dev, void *src, void *dst,
 	uint32_t i = 0;
 	uint32_t num = 0;
 
-	if (src_off >= npu_dev->tcm_io.size ||
-		(npu_dev->tcm_io.size - src_off) < size) {
-		NPU_ERR("memory read exceeds io region %x:%x:%x\n",
-			src_off, size, npu_dev->tcm_io.size);
-		return 0;
-	}
-
 	num = size/4;
 	for (i = 0; i < num; i++) {
 		out32[i] = readl_relaxed(npu_dev->tcm_io.base + src_off);
@@ -191,9 +154,8 @@ void *npu_ipc_addr(void)
 	return (void *)(IPC_MEM_OFFSET_FROM_SSTCM);
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Interrupt
- * -------------------------------------------------------------------------
  */
 void npu_interrupt_ack(struct npu_device *npu_dev, uint32_t intr_num)
 {
@@ -211,9 +173,8 @@ int32_t npu_interrupt_raise_dsp(struct npu_device *npu_dev)
 	return 0;
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - ION Memory
- * -------------------------------------------------------------------------
  */
 static struct npu_ion_buf *npu_alloc_npu_ion_buffer(struct npu_client
 	*client, int buf_hdl, uint32_t size)
@@ -408,9 +369,8 @@ void npu_mem_unmap(struct npu_client *client, int buf_hdl,  uint64_t addr)
 	npu_free_npu_ion_buffer(client, buf_hdl);
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Features
- * -------------------------------------------------------------------------
  */
 uint8_t npu_hw_clk_gating_enabled(void)
 {
@@ -422,9 +382,8 @@ uint8_t npu_hw_log_enabled(void)
 	return 1;
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Subsystem/PIL
- * -------------------------------------------------------------------------
  */
 void *subsystem_get_local(char *sub_system)
 {
@@ -436,9 +395,8 @@ void subsystem_put_local(void *sub_system_handle)
 	return subsystem_put(sub_system_handle);
 }
 
-/* -------------------------------------------------------------------------
+/*
  * Functions - Log
- * -------------------------------------------------------------------------
  */
 void npu_process_log_message(struct npu_device *npu_dev, uint32_t *message,
 	uint32_t size)

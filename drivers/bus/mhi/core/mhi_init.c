@@ -1683,6 +1683,7 @@ exit_probe:
 	mhi_unprepare_from_transfer(mhi_dev);
 
 	mhi_device_put(mhi_dev, MHI_VOTE_DEVICE);
+
 	return ret;
 }
 

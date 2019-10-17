@@ -13,9 +13,8 @@
 #ifndef NPU_HW_H
 #define NPU_HW_H
 
-/* -------------------------------------------------------------------------
+/*
  * Defines
- * -------------------------------------------------------------------------
  */
 #define NPU_HW_VERSION (0x00000000)
 #define NPU_MASTERn_IPC_IRQ_OUT(n) (0x00001004+0x1000*(n))
@@ -78,8 +77,5 @@
 #define Q6SS_RSC_SHUTDOWN_ACK_EN (1 << 1)
 #define NPU_CC_NPU_MASTERn_WDOG_BITE_IRQ_OWNER(n) (0x0006010+4*(n))
 #define NPU_CC_NPU_MASTERn_WDOG_BITE_IRQ_STATUS(n) (0x00009030+0x1000*(n))
-
-#define TCSR_NPU_CPC_PWR_ON (0x0003700C)
-#define NPU_CPC_PWR_ON (1 << 0)
 
 #endif /* NPU_HW_H */
