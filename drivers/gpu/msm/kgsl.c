@@ -4908,6 +4908,9 @@ int kgsl_device_platform_probe(struct kgsl_device *device)
 	/* Disable the sparse ioctl invocation as they are not used */
 	device->flags &= ~KGSL_FLAG_SPARSE;
 
+	/* Disable the sparse ioctl invocation as they are not used */
+	device->flags &= ~KGSL_FLAG_SPARSE;
+
 	status = kgsl_pwrctrl_init(device);
 	if (status)
 		goto error;
