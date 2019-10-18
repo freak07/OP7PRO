@@ -8254,6 +8254,7 @@ static int find_energy_efficient_cpu(struct sched_domain *sd,
 	bool is_uxtop = is_opc_task(p, UT_FORE);
 
 	fbt_env.fastpath = 0;
+	fbt_env.need_idle = 0;
 
 // add for chainboost CONFIG_ONEPLUS_CHAIN_BOOST
 	if (p->main_boost_switch == 1 && p->group_leader == p) {

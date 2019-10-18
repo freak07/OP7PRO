@@ -1214,6 +1214,26 @@ int cnss_force_collect_rddm(struct device *dev)
 }
 EXPORT_SYMBOL(cnss_force_collect_rddm);
 
+int cnss_qmi_send_get(struct device *dev)
+{
+	return 0;
+}
+EXPORT_SYMBOL(cnss_qmi_send_get);
+
+int cnss_qmi_send_put(struct device *dev)
+{
+	return 0;
+}
+EXPORT_SYMBOL(cnss_qmi_send_put);
+
+int cnss_qmi_send(struct device *dev, int type, void *cmd,
+		  int cmd_len, void *cb_ctx,
+		  int (*cb)(void *ctx, void *event, int event_len))
+{
+	return -EINVAL;
+}
+EXPORT_SYMBOL(cnss_qmi_send);
+
 static int cnss_cold_boot_cal_start_hdlr(struct cnss_plat_data *plat_priv)
 {
 	int ret = 0;
@@ -1352,7 +1372,7 @@ static int cnss_qdss_trace_save_hdlr(struct cnss_plat_data *plat_priv,
 			va = cnss_qdss_trace_pa_to_va(plat_priv, pa,
 						      size, &seg_id);
 			if (!va) {
-				cnss_pr_err("Fail to find matching va for pa %pa\n",
+				cnss_pr_err("Fail to find matching va for pa 0x%llx\n",
 					    pa);
 				ret = -EINVAL;
 				break;

@@ -172,7 +172,9 @@ dtb-$(CONFIG_QTI_GVM) += sa8155-vm.dtb \
 	sa8155-vm-lv-mt.dtb \
 	sa8155-vm-la-mt.dtb \
 	sa6155p-vm.dtb \
-	sa8195-vm.dtb
+	sa8195-vm.dtb \
+	sa8195-vm-lv.dtb \
+	sa8195-vm-lv-mt.dtb
 
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 	dtbo-$(CONFIG_ARCH_SDMSHRIKE) += \
@@ -319,7 +321,10 @@ ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 		atoll-qrd-overlay.dtbo\
 		atoll-wcd937x-idp-overlay.dtbo\
 		atoll-usbc-idp-overlay.dtbo\
-		atoll-rumi-overlay.dtbo
+		atoll-rumi-overlay.dtbo\
+		atollp-idp-overlay.dtbo \
+		atollp-atp-overlay.dtbo \
+		atollp-qrd-overlay.dtbo
 
 atoll-idp-overlay.dtbo-base := atoll.dtb
 atoll-atp-overlay.dtbo-base := atoll.dtb
@@ -327,13 +332,19 @@ atoll-qrd-overlay.dtbo-base := atoll.dtb
 atoll-rumi-overlay.dtbo-base := atoll.dtb
 atoll-wcd937x-idp-overlay.dtbo-base := atoll.dtb
 atoll-usbc-idp-overlay.dtbo-base := atoll.dtb
+atollp-idp-overlay.dtbo-base := atollp.dtb
+atollp-atp-overlay.dtbo-base := atollp.dtb
+atollp-qrd-overlay.dtbo-base := atollp.dtb
 else
 dtb-$(CONFIG_ARCH_ATOLL)	+= atoll-idp.dtb\
 	atoll-atp.dtb\
 	atoll-qrd.dtb\
 	atoll-wcd937x-idp.dtb\
 	atoll-usbc-idp.dtb\
-	atoll-rumi.dtb
+	atoll-rumi.dtb\
+	atollp-idp.dtb\
+	atollp-atp.dtb\
+	atollp-qrd.dtb
 endif
 
 dtb-$(CONFIG_ARCH_SDXPRAIRIE) += sdxprairie-rumi.dtb \
@@ -341,6 +352,7 @@ dtb-$(CONFIG_ARCH_SDXPRAIRIE) += sdxprairie-rumi.dtb \
 	sdxprairie-dsda-cdp.dtb \
 	sdxprairie-mtp.dtb \
 	sdxprairie-pcie-ep-mtp.dtb \
+	sdxprairie-v2-pcie-ep-mtp.dtb \
 	sdxprairie-mtp-cpe.dtb \
 	sdxprairie-cdp-cpe.dtb \
 	sdxprairie-mtp-le-cpe.dtb \
@@ -352,7 +364,10 @@ dtb-$(CONFIG_ARCH_SDXPRAIRIE) += sdxprairie-rumi.dtb \
 	sdxprairie-v2-mtp.dtb \
 	sa515m-ccard.dtb \
 	sa515m-ccard-pcie-ep.dtb \
-	sa515m-ccard-usb-ep.dtb
+	sa515m-ccard-usb-ep.dtb \
+	sa515m-v2-ccard.dtb \
+	sa515m-v2-ccard-pcie-ep.dtb \
+	sa515m-v2-ccard-usb-ep.dtb
 
 ifeq ($(CONFIG_ARM64),y)
 always		:= $(dtb-y)
