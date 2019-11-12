@@ -1023,7 +1023,7 @@ static int m1120_enable_irq(bool enable)
 	return 0;
 }
 
-static int m1120_clear_irq(void)
+static int m1120_clear_irq()
 {
 	printk(KERN_INFO "  %s", __func__);
 	if(p_m1120_data == NULL) {
@@ -1035,7 +1035,7 @@ static int m1120_clear_irq(void)
 	return 0;
 }
 
-static int m1120_get_irq_state(void)
+static int m1120_get_irq_state()
 {
 	printk(KERN_INFO "  %s", __func__);
 	if(p_m1120_data == NULL) {
@@ -1114,7 +1114,7 @@ static void m1120_dump_reg(u8* buf)
 	return;
 }
 
-static bool m1120_is_power_on(void)
+static bool m1120_is_power_on()
 {
 	printk(KERN_INFO "  %s", __func__);
 	if (p_m1120_data == NULL) {

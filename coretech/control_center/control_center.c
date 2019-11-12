@@ -95,9 +95,6 @@ static void cc_boost_ts_update(struct cc_command* cc)
 	int idx = 0;
 	bool reset = cc->type == CC_CTL_TYPE_RESET || cc->type == CC_CTL_TYPE_RESET_NONBLOCK;
 
-	if (!cc)
-		return;
-
 	if (cc->category != CC_CTL_CATEGORY_CLUS_1_FREQ)
 		return;
 
