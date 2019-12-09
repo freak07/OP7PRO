@@ -173,7 +173,6 @@ static void __cam_isp_ctx_update_state_monitor_array(
 		jiffies_to_msecs(jiffies);
 }
 
-#if 0
 static const char *__cam_isp_ctx_substate_val_to_type(
 	uint32_t type)
 {
@@ -271,7 +270,6 @@ static void __cam_isp_ctx_dump_state_monitor_array(
 		}
 	}
 }
-#endif
 
 static void cam_isp_ctx_dump_req(struct cam_isp_ctx_req *req_isp,
 	uintptr_t cpu_addr,
