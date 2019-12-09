@@ -207,6 +207,7 @@ struct cam_hw_stream_setttings {
  * @num_out_map_entries:   Number of out map entries
  * @priv:                  Private pointer
  * @request_id:            Request ID
+ * @reapply                True if reapplying after bubble
  *
  */
 struct cam_hw_config_args {
@@ -218,6 +219,7 @@ struct cam_hw_config_args {
 	void                           *priv;
 	uint64_t                        request_id;
 	bool                            init_packet;
+	bool                            reapply;
 };
 
 /**
@@ -359,7 +361,6 @@ struct cam_hw_mgr_intf {
 	int (*hw_flush)(void *hw_priv, void *hw_flush_args);
 	int (*hw_dump)(void *hw_priv, void *hw_dump_args);
 	int (*hw_reset)(void *hw_priv, void *hw_reset_args);
-	int (*hw_dump)(void *hw_priv, void *hw_dump_args);
 };
 
 #endif /* _CAM_HW_MGR_INTF_H_ */
