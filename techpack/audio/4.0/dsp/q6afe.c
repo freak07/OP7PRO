@@ -110,7 +110,7 @@ struct afe_ctl {
 	wait_queue_head_t wait_wakeup;
 	struct task_struct *task;
 	wait_queue_head_t lpass_core_hw_wait;
-	uint32_t lpass_hw_core_client_hdl;
+	uint32_t lpass_hw_core_client_hdl[AFE_LPASS_CORE_HW_VOTE_MAX];
 	void (*tx_cb)(uint32_t opcode,
 		uint32_t token, uint32_t *payload, void *priv);
 	void (*rx_cb)(uint32_t opcode,
@@ -571,6 +571,8 @@ static bool afe_token_is_valid(uint32_t token)
 
 static int32_t afe_callback(struct apr_client_data *data, void *priv)
 {
+	uint16_t i = 0;
+
 	if (!data) {
 		pr_err("%s: Invalid param data\n", __func__);
 		return -EINVAL;
@@ -595,6 +597,12 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			this_afe.apr = NULL;
 			rtac_set_afe_handle(this_afe.apr);
 		}
+
+		/* Reset the core client handle in SSR/PDR use cases */
+		mutex_lock(&this_afe.afe_cmd_lock);
+		for (i = 0; i < AFE_LPASS_CORE_HW_VOTE_MAX; i++)
+			this_afe.lpass_hw_core_client_hdl[i] = 0;
+		mutex_unlock(&this_afe.afe_cmd_lock);
 
 		/*
 		 * Pass reset events to proxy driver, if cb is registered
@@ -668,7 +676,9 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 
 		pr_debug("%s: AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST handle %d\n",
 			__func__, payload[0]);
-		this_afe.lpass_hw_core_client_hdl = payload[0];
+		if (data->token < AFE_LPASS_CORE_HW_VOTE_MAX)
+			this_afe.lpass_hw_core_client_hdl[data->token] =
+								payload[0];
 		atomic_set(&this_afe.state, 0);
 		atomic_set(&this_afe.status, 0);
 		wake_up(&this_afe.lpass_core_hw_wait);
@@ -9079,6 +9089,8 @@ int __init afe_init(void)
 	this_afe.mmap_handle = 0;
 	this_afe.vi_tx_port = -1;
 	this_afe.vi_rx_port = -1;
+	for (i = 0; i < AFE_LPASS_CORE_HW_VOTE_MAX; i++)
+		this_afe.lpass_hw_core_client_hdl[i] = 0;
 	this_afe.prot_cfg.mode = MSM_SPKR_PROT_DISABLED;
 	this_afe.th_ftm_cfg.mode = MSM_SPKR_PROT_DISABLED;
 	this_afe.ex_ftm_cfg.mode = MSM_SPKR_PROT_DISABLED;
@@ -9210,7 +9222,7 @@ int afe_vote_lpass_core_hw(uint32_t hw_block_id, char *client_name,
 	cmd_ptr->hdr.pkt_size = sizeof(hw_vote_cfg);
 	cmd_ptr->hdr.src_port = 0;
 	cmd_ptr->hdr.dest_port = 0;
-	cmd_ptr->hdr.token = 0;
+	cmd_ptr->hdr.token = hw_block_id;
 	cmd_ptr->hdr.opcode = AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST;
 	cmd_ptr->hw_block_id = hw_block_id;
 	strlcpy(cmd_ptr->client_name, client_name,
@@ -9251,9 +9263,9 @@ int afe_vote_lpass_core_hw(uint32_t hw_block_id, char *client_name,
 		goto done;
 	}
 
-	*client_handle = this_afe.lpass_hw_core_client_hdl;
+	*client_handle = this_afe.lpass_hw_core_client_hdl[hw_block_id];
 	pr_debug("%s: lpass_hw_core_client_hdl %d\n", __func__,
-		this_afe.lpass_hw_core_client_hdl);
+		this_afe.lpass_hw_core_client_hdl[hw_block_id]);
 done:
 	mutex_unlock(&this_afe.afe_cmd_lock);
 	return ret;
@@ -9283,6 +9295,11 @@ int afe_unvote_lpass_core_hw(uint32_t hw_block_id, uint32_t client_handle)
 
 	mutex_lock(&this_afe.afe_cmd_lock);
 
+	if (!this_afe.lpass_hw_core_client_hdl[hw_block_id]) {
+		pr_debug("%s: SSR in progress, return\n", __func__);
+		goto done;
+	}
+
 	memset(cmd_ptr, 0, sizeof(hw_vote_cfg));
 
 	cmd_ptr->hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
@@ -9298,6 +9315,12 @@ int afe_unvote_lpass_core_hw(uint32_t hw_block_id, uint32_t client_handle)
 
 	pr_debug("%s: lpass core hw unvote opcode[0x%x] hw id[0x%x]\n",
 		__func__, cmd_ptr->hdr.opcode, cmd_ptr->hw_block_id);
+
+	if (cmd_ptr->client_handle <= 0) {
+		pr_err("%s: invalid client handle\n", __func__);
+		ret = -EINVAL;
+		goto done;
+	}
 
 	atomic_set(&this_afe.status, 0);
 	atomic_set(&this_afe.state, 1);
