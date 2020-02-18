@@ -1548,17 +1548,6 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 		pr_info("icl_ua=%d\n", icl_ua);
 	}
 
-	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC) {
-		rc = smblib_masked_write(chg, USB_CMD_PULLDOWN_REG,
-				EN_PULLDOWN_USB_IN_BIT,
-				suspend ? 0 : EN_PULLDOWN_USB_IN_BIT);
-		if (rc < 0) {
-			smblib_err(chg, "Couldn't write %s to EN_PULLDOWN_USB_IN_BIT rc=%d\n",
-				suspend ? "disable" : "enable", rc);
-			goto out;
-		}
-	}
-
 	if (suspend)
 		return smblib_set_usb_suspend(chg, true);
 
@@ -6458,6 +6447,7 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
 	u8 stat;
+	bool attached = false;
 	int rc;
 	int i = 0, dump_offset = 6;
 
@@ -6517,8 +6507,9 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	if (stat & TYPEC_ATTACH_DETACH_STATE_BIT) {
+	attached = !!(stat & TYPEC_ATTACH_DETACH_STATE_BIT);
 
+	if (attached) {
 		smblib_lpd_clear_ra_open_work(chg);
 
 		rc = smblib_read(chg, TYPE_C_MISC_STATUS_REG, &stat);
@@ -6577,6 +6568,13 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 			schedule_delayed_work(&chg->lpd_detach_work,
 					msecs_to_jiffies(1000));
 	}
+
+	rc = smblib_masked_write(chg, USB_CMD_PULLDOWN_REG,
+			EN_PULLDOWN_USB_IN_BIT,
+			attached ?  0 : EN_PULLDOWN_USB_IN_BIT);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't configure pulldown on USB_IN rc=%d\n",
+				rc);
 
 	power_supply_changed(chg->usb_psy);
 	if (chg->dual_role)
